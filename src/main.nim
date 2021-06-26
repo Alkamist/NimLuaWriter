@@ -15,9 +15,18 @@ macro writeLua(indentation: static[int], code: typed): untyped =
 
   proc toLua(n: NimNode): string
 
-  proc stmtListLua(n: NimNode): string =
+  proc stmtListToLua(n: NimNode): string =
     for statement in n:
       result.indent(statement.toLua & "\n")
+
+  proc bracketToLua(n: NimNode): string =
+    result.add("{")
+    let lastId = n.len - 1
+    for i in 0 .. lastId:
+      result.add(n[i].toLua)
+      if i < lastId:
+        result.add(", ")
+    result.add("}")
 
   proc intLitToLua(n: NimNode): string =
     $n.intVal
@@ -44,9 +53,9 @@ macro writeLua(indentation: static[int], code: typed): untyped =
       if i < lastId:
         result.add(", ")
 
-    let assigment = n[n.len - 1]
-    if assigment.kind != nnkEmpty:
-      result.add(" = " & assigment.toLua)
+    let assignment = n[n.len - 1]
+    if assignment.kind != nnkEmpty:
+      result.add(" = " & assignment.toLua)
 
   proc infixToLua(n: NimNode): string =
     n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
@@ -129,8 +138,10 @@ macro writeLua(indentation: static[int], code: typed): untyped =
     of nnkEmpty: ""
     of nnkTemplateDef: ""
     of nnkMacroDef: ""
-    of nnkStmtList: n.stmtListLua
-    of nnkStmtListExpr: n.stmtListLua
+    of nnkIncludeStmt: ""
+    of nnkStmtList: n.stmtListToLua
+    of nnkStmtListExpr: n.stmtListToLua
+    of nnkBracket: n.bracketToLua
     of nnkIntLit: n.intLitToLua
     of nnkFloatLit: n.floatLitToLua
     of nnkStrLit: n.strLitToLua
@@ -155,6 +166,10 @@ let luaCode = writeLua(2):
   proc add(a, b: int): int =
     a + b
 
-  discard add(5, 6)
+  let
+    x = 5
+    y = 6
+
+  discard add(x, y)
 
 echo luaCode

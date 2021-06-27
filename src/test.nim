@@ -1,6 +1,2 @@
-type
-  Point = object
-    x, y: int
-    z: int
-
-let a = Point()
+proc test(a, b = 1): int =
+  a + b

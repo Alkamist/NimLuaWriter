@@ -1,6 +1,14 @@
 import std/macros
 
 
+template luaTypeDefaultValue(name: string): untyped =
+  case name:
+  of "int": 0
+  of "float": 0.0
+  of "bool": false
+  of "string": ""
+  else: name & "_init()"
+
 template luaDefaultValueCode(name, value: string): string =
   "if " & name & " == nil then " & name & " = " & value & " end\n"
 
@@ -28,8 +36,16 @@ proc indent(s: var LuaWriter, text: string): string =
   result.add(text)
 
 proc stmtListToLua(s: var LuaWriter, n: NimNode): string =
-  for statement in n:
-    result.add(s.indent(s.toLua(statement) & "\n"))
+  let lastId = n.len - 1
+
+  result.add(s.toLua(n[0]))
+  if lastId > 0:
+    result.add("\n")
+
+  template generator(i: untyped): untyped =
+    s.indent(s.toLua(n[i]))
+
+  separatedList(1, n.len - 1, generator, "\n")
 
 proc intLitToLua(s: var LuaWriter, n: NimNode): string =
   $n.intVal
@@ -89,7 +105,7 @@ proc procDefToLua(s: var LuaWriter, n: NimNode): string =
   let params = n[3]
   result.add("(" & s.toLua(params) & ")\n")
 
-  var body = nnkStmtList.newTree(n[6])
+  var body = n[6]
 
   s.indentationLevel += 1
 
@@ -110,7 +126,7 @@ proc procDefToLua(s: var LuaWriter, n: NimNode): string =
                               s.toLua(defaultValue))
         ))
 
-  result.add(s.toLua(body))
+  result.add(s.indent(s.toLua(body) & "\n"))
   result.add(s.indent("return result\n"))
 
   s.indentationLevel -= 1
@@ -149,20 +165,38 @@ proc bracketExprToLua(s: var LuaWriter, n: NimNode): string =
 proc hiddenStdConvToLua(s: var LuaWriter, n: NimNode): string =
   s.toLua(n[1])
 
-proc typeSectionToLua(s: var LuaWriter, n: NimNode): string =
-  s.toLua(n[0])
+# proc typeSectionToLua(s: var LuaWriter, n: NimNode): string =
+#   for typeDef in n:
+#     result.add(s.toLua(typeDef))
 
-proc typeDefToLua(s: var LuaWriter, n: NimNode): string =
-  let typeName = s.toLua(n[0])
-  let recList = n[2][2]
+# proc recListIdentDefsToLua(s: var LuaWriter, n: NimNode): string =
+#   result.add(s.toLua(n[0]))
 
-  result.add("local " & typeName & " = {}\n")
-  result.add("function " & typeName & ".init()\n")
+#   template generator(i: untyped): untyped =
+#     s.toLua(n[i])
 
-  result.add("end")
+#   separatedList(0, n.len - 3, generator, "\n")
 
-proc objConstrToLua(s: var LuaWriter, n: NimNode): string =
-  s.toLua(n[0]) & ".init()"
+# proc recListToLua(s: var LuaWriter, n: NimNode): string =
+#   for identDef in n:
+#     template generator(i: untyped): untyped =
+#       s.indent(s.recListIdentDefsToLua(identDef[i]))
+
+#     separatedList(0, n.len - 1, generator, "\n")
+
+# proc typeDefToLua(s: var LuaWriter, n: NimNode): string =
+#   let typeName = s.toLua(n[0])
+#   let recList = n[2][2]
+
+#   result.add("function " & typeName & "_init()\n")
+
+#   result.add(s.indent(s.toLua(recList)))
+
+#   result.add(s.indent("end"))
+
+# proc objConstrToLua(s: var LuaWriter, n: NimNode): string =
+#   ""
+#   # s.toLua(n[0]) & ".init()"
 
 proc toLua(s: var LuaWriter, n: NimNode): string =
   case n.kind:
@@ -171,6 +205,7 @@ proc toLua(s: var LuaWriter, n: NimNode): string =
   of nnkMacroDef: ""
   of nnkIncludeStmt: ""
   of nnkStmtList: s.stmtListToLua(n)
+  of nnkStmtListExpr: s.stmtListToLua(n)
   of nnkIntLit: s.intLitToLua(n)
   of nnkFloatLit: s.floatLitToLua(n)
   of nnkStrLit: s.strLitToLua(n)
@@ -189,9 +224,10 @@ proc toLua(s: var LuaWriter, n: NimNode): string =
   of nnkBracket: s.bracketToLua(n)
   of nnkBracketExpr: s.bracketExprToLua(n)
   of nnkHiddenStdConv: s.hiddenStdConvToLua(n)
-  of nnkTypeSection: s.typeSectionToLua(n)
-  of nnkTypeDef: s.typeDefToLua(n)
-  of nnkObjConstr: s.objConstrToLua(n)
+  # of nnkTypeSection: s.typeSectionToLua(n)
+  # of nnkRecList: s.recListToLua(n)
+  # of nnkTypeDef: s.typeDefToLua(n)
+  # of nnkObjConstr: s.objConstrToLua(n)
   else: raise newException(IOError, "Unhandled NimNode kind: " & $n.kind)
 
 

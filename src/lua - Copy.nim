@@ -4,7 +4,12 @@ proc makeIndentationStr(indentation: int): string =
   for _ in 0 ..< indentation:
     result.add(" ")
 
-proc writeLua(indentation: int, code: NimNode): string {.compileTime.} =
+#proc defaultValues()
+
+proc luaDefaultValueCode(name, value: string): string =
+  "if " & name & " == nil then " & name & " = " & value & " end\n"
+
+macro writeLua*(indentation: static[int], code: typed): untyped =
   let indentationStr = makeIndentationStr(indentation)
   var indentationLevel = 0
 
@@ -133,6 +138,41 @@ proc writeLua(indentation: int, code: NimNode): string {.compileTime.} =
         result.add(", ")
     result.add(")")
 
+  proc hiddenStdConvToLua(n: NimNode): string =
+    n[1].toLua
+
+  proc bracketExprToLua(n: NimNode): string =
+    n[0].toLua & "[" & n[1].toLua & "]"
+
+  proc typeSectionToLua(n: NimNode): string =
+    n[0].toLua
+
+  # proc recListToLua(n: NimNode): string =
+  #   let lastId = n.len - 1
+  #   for identDef in 0 .. lastId:
+  #     let lastIdentId = identDef.len - 3
+  #     for identId in 0 .. lastIdentId:
+  #       let identValue = identDefs[identId].toLua
+  #       luaDefaultValueCode(identDefs[identId].toLua, defaultValue.toLua)
+
+  proc typeDefToLua(n: NimNode): string =
+    let typeName = n[0].toLua
+    let recList = n[2][2]
+
+    result.add("local " & typeName & " = {}\n")
+    result.add("function " & typeName & ".init()\n")
+
+    # for identDef in recList:
+    #   for identId in 0 .. lastIdentId:
+    #     let identValue = identDefs[identId].toLua
+    #     result.indent("if " & identValue & " == nil then " &
+    #                   identValue & " = " & defaultValue.toLua & " end\n")
+
+    result.add("end")
+
+  proc objConstrToLua(n: NimNode): string =
+    n[0].toLua & ".init()"
+
   proc toLua(n: NimNode): string =
     case n.kind:
     of nnkEmpty: ""
@@ -157,11 +197,12 @@ proc writeLua(indentation: int, code: NimNode): string {.compileTime.} =
     of nnkDiscardStmt: n.discardStmtToLua
     of nnkProcDef: n.procDefToLua
     of nnkCall: n.callToLua
+    of nnkHiddenStdConv: n.hiddenStdConvToLua
+    of nnkBracketExpr: n.bracketExprToLua
+    of nnkTypeSection: n.typeSectionToLua
+    of nnkTypeDef: n.typeDefToLua
+    of nnkObjConstr: n.objConstrToLua
     else: raise newException(IOError, "Unhandled NimNode kind: " & $n.kind)
 
-  #echo code.treeRepr
-  return code.toLua
-
-const luaCode = writeLua(2, parseStmt(readFile("test.nim")))
-
-echo luaCode
+  echo code.treeRepr
+  result = newStmtList(newStrLitNode(code.toLua))

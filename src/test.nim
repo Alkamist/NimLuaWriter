@@ -1,8 +1,6 @@
-proc add(a, b: int): int =
-  a + b
+type
+  Point = object
+    x, y: int
+    z: int
 
-let
-  x = 5
-  y = 6
-
-discard add(x, y)
+let a = Point()

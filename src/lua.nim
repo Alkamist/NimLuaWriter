@@ -112,6 +112,20 @@ proc procDefResultReturn(n: NimNode): string =
     if body[lastId].kind != nnkReturnStmt:
       result.add("return result\n")
 
+  else:
+    result.add("return result\n")
+
+proc elifBranchText(isFirst: bool, cond, body: string): string =
+  if isFirst:
+    result.add("if ")
+  else: result.add("elseif ")
+  result.add(cond & " then\n" &
+             ScopeBegin & body & "\n" &
+             ScopeEnd)
+
+proc elseBranchText(body: string): string =
+  "else\n" & ScopeBegin & body & "\n" & ScopeEnd
+
 #=================== NimNodes ===================
 
 proc stmtListToLua(n: NimNode): string =
@@ -145,19 +159,47 @@ proc infixToLua(n: NimNode): string =
   n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
 
 proc asgnToLua(n: NimNode): string =
+  template assignStart(): untyped =
+    let variableName {.inject.} = n[0].toLua
+
+    if variableName != "result":
+      result.add("local " & variableName & "\n")
+
+    result.add("do\n" & ScopeBegin)
+
   if n[1].kind == nnkStmtListExpr:
+    assignStart()
+
     let
-      variableName = n[0].toLua
       expression = n[1]
       expressionLastIndex = expression.len - 1
-
-    result.add("local " & variableName & "\ndo\n" & ScopeBegin)
 
     template generator(i: untyped): untyped = expression[i].toLua
     separatedList(0, expressionLastIndex - 1, generator, "\n")
 
     result.add("\n" & variableName & " = " &
                expression[expressionLastIndex].toLua & "\n" & ScopeEnd & "end")
+
+  elif n[1].kind == nnkIfExpr:
+    assignStart()
+
+    let ifExpression = n[1]
+
+    for branchId, branch in ifExpression:
+      proc bodyText(body: NimNode): string =
+        let bodyLastId = body.len - 1
+        template generator(i: untyped): untyped = body[i].toLua
+        separatedList(0, bodyLastId - 1, generator, "\n")
+        result.add("\n" & variableName & " = " & body[bodyLastId].toLua)
+
+      if branch.kind == nnkElifBranch:
+        result.add(elifBranchText(branchId == 0, branch[0].toLua, branch[1].bodyText))
+      else:
+        result.add(elseBranchText(branch[0].bodyText))
+
+    result.add("end")
+
+    result.add("\n" & ScopeEnd & "end")
 
   else:
     result.add(n[0].toLua & " = " & n[1].toLua)
@@ -186,38 +228,23 @@ proc returnStmtToLua(n: NimNode): string =
   else:
     "return " & n[0].toLua
 
-# proc discardStmtToLua(s: var LuaState, n: NimNode): string =
-#   s.toLua(n[0])
+proc discardStmtToLua(n: NimNode): string =
+  n[0].toLua
 
-# proc callToLua(s: var LuaState, n: NimNode): string =
-#   result.add(s.toLua(n[0]) & "(")
+proc callToLua(n: NimNode): string =
+  result.add(n[0].toLua & "(")
+  template generator(i: untyped): untyped = n[i].toLua
+  separatedList(1, n.len - 1, generator, ", ")
+  result.add(")")
 
-#   template generator(i: untyped): untyped =
-#     s.toLua(n[i])
-
-#   separatedList(1, n.len - 1, generator, ", ")
-
-#   result.add(")")
-
-# proc ifStmtToLua(s: var LuaState, n: NimNode): string =
-#   let lastId = n.len - 1
-#   for i in 0 .. lastId:
-#     if i == 0 and n[i].kind == nnkElifBranch:
-#       result.add("if " & s.toLua(n[i][0]) & " then\n" &
-#                  ScopeBegin & s.toLua(n[i][1]) & "\n" &
-#                  ScopeEnd)
-#     elif n[i].kind == nnkElifBranch:
-#       result.add("elseif " & s.toLua(n[i][0]) & " then\n" &
-#                  ScopeBegin & s.toLua(n[i][1]) & "\n" &
-#                  ScopeEnd)
-#     else:
-#       result.add("else\n" &
-#                  ScopeBegin & s.toLua(n[i][0]) & "\n" & ScopeEnd)
-
-#   result.add("end")
-
-# proc elifBranchToLua(s: var LuaState, n: NimNode): string =
-#   "if "
+proc ifStmtToLua(n: NimNode): string =
+  let lastId = n.len - 1
+  for i in 0 .. lastId:
+    if n[i].kind == nnkElifBranch:
+      result.add(elifBranchText(i == 0, n[i][0].toLua, n[i][1].toLua))
+    else:
+      result.add(elseBranchText(n[i][0].toLua))
+  result.add("end")
 
 # proc bracketToLua(s: var LuaState, n: NimNode): string =
 #   result.add("{")
@@ -275,7 +302,6 @@ proc toLua(n: NimNode): string =
   of nnkMacroDef: ""
   of nnkIncludeStmt: ""
   of nnkStmtList: stmtListToLua(n)
-  of nnkStmtListExpr: stmtListToLua(n)
   of nnkIntLit: intLitToLua(n)
   of nnkFloatLit: floatLitToLua(n)
   of nnkStrLit: strLitToLua(n)
@@ -289,9 +315,10 @@ proc toLua(n: NimNode): string =
   of nnkFormalParams: formalParamsToLua(n)
   of nnkProcDef: procDefToLua(n)
   of nnkReturnStmt: returnStmtToLua(n)
-  # of nnkDiscardStmt: s.discardStmtToLua(n)
-  # of nnkCall: s.callToLua(n)
-  # of nnkIfStmt: s.ifStmtToLua(n)
+  of nnkDiscardStmt: discardStmtToLua(n)
+  of nnkCall: callToLua(n)
+  of nnkIfStmt: ifStmtToLua(n)
+  of nnkIfExpr: ifStmtToLua(n)
   # of nnkElifBranch: s.elifBranchToLua(n)
   # of nnkElse: s.elifBranchToLua(n)
   # of nnkBracket: s.bracketToLua(n)

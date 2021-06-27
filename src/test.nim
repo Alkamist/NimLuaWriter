@@ -1,3 +1,2 @@
-proc add(a = 1, b = 2): int =
-  let c = 3
-  a + b + c
+proc add(a = 1): int =
+  let b = if a == 1: 1 else: 0

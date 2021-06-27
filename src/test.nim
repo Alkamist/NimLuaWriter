@@ -1,2 +1,3 @@
-proc test(a, b = 1): int =
-  a + b
+proc add(a = 1, b = 2): int =
+  let c = 3
+  a + b + c

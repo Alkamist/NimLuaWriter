@@ -1,6 +1,7 @@
 import
   std/macros,
-  std/tables
+  std/tables,
+  std/strutils
 
 type
   LuaNodeKind* = enum
@@ -23,14 +24,13 @@ type
     else: childNodes*: seq[LuaNode]
 
   LuaOperatorKind* = enum
-    lokAdd = "+", lokSubtract = "-", lokMultiply = "*", lokDivide = "/",
+    lokPlus = "+", lokMinus = "-", lokStar = "*", lokSlash = "/",
     lokMod = "%", lokExponent = "^",
-    lokUnaryMinus = "-",
     lokEquals = "=", lokNotEquals = "~=", lokEqualsEquals = "==",
     lokGreater = ">", lokGreaterEquals = ">=",
-    lokLesser = "=", lokLesserEquals = "==",
+    lokLesser = "<", lokLesserEquals = "<=",
     lokAnd = "and", lokOr = "or", lokNot = "not",
-    lokLength = "#", lokConcat = ".."
+    lokLength = "#", lokConcat = "..",
 
 const
   lnkNonTrees = {lnkNone..lnkNilLit}
@@ -38,6 +38,9 @@ const
   IndentLevelDown = "@INDENT_DOWN"
 
 proc toLua*(n: LuaNode): string
+
+proc toString*(kind: LuaOperatorKind): string =
+  parseEnum[LuaOperatorKind](kind)
 
 proc newLuaNode*(kind: LuaNodeKind): LuaNode =
   LuaNode(kind: kind)
@@ -86,11 +89,14 @@ proc `[]`*(n: LuaNode, i: int): LuaNode =
 proc `[]`*(n: LuaNode, i: BackwardsIndex): LuaNode =
   n.childNodes[n.len - i.int]
 
-proc `[]=`*(n: var LuaNode, i: int, v: LuaNode) =
-  n.childNodes[i] = v
+proc `[]=`*(n: var LuaNode, i: int, child: LuaNode) =
+  n.childNodes[i] = child
 
-proc `[]=`*(n: var LuaNode, i: BackwardsIndex, v: LuaNode): LuaNode =
-  n.childNodes[n.len - i.int] = v
+proc `[]=`*(n: var LuaNode, i: BackwardsIndex, child: LuaNode): LuaNode =
+  n.childNodes[n.len - i.int] = child
+
+proc add*(n: var LuaNode, child: LuaNode) =
+  n.childNodes.add(child)
 
 iterator items*(n: LuaNode): LuaNode {.inline.} =
   for i in 0 ..< n.len:
@@ -288,47 +294,3 @@ proc addIndentation(spaces: int, text: string): string =
 
 proc toLua*(n: LuaNode, indentationSpaces: int): string =
   addIndentation(indentationSpaces, n.toLua)
-
-######################################################################
-
-when isMainModule:
-  # var functionDef = lnkFnDef.newLuaTree(
-  #   newLuaIdentNode("testFn"),
-  #   lnkFnParams.newLuaTree(
-  #     newLuaIdentNode("a"),
-  #     newLuaIdentNode("b"),
-  #   ),
-  #   lnkDotExpr.newLuaTree(
-  #     newLuaIdentNode("z"),
-  #     lnkCall.newLuaTree(
-  #       newLuaIdentNode("add"),
-  #       lnkInfix.newLuaTree(newLuaIdentNode("+"), newLuaIdentNode("a"), newLuaIdentNode("b")),
-  #       lnkInfix.newLuaTree(newLuaIdentNode("+"), newLuaIdentNode("a"), newLuaIdentNode("b")),
-  #     ),
-  #   ),
-  # )
-
-  # var whileLoop = lnkWhileStmt.newLuaTree(
-  #   newLuaIdentNode("true"),
-  #   functionDef,
-  # )
-
-  # var forLoop = lnkForStmt.newLuaTree(
-  #   lnkInfix.newLuaTree(newLuaIdentNode("="), newLuaIdentNode("i"), newLuaIntLitNode(1)),
-  #   lnkPrefix.newLuaTree(
-  #     newLuaIdentNode("#"),
-  #     newLuaIdentNode("z"),
-  #   ),
-  #   newLuaEmptyNode(),
-  #   functionDef,
-  # )
-
-  var ifTest = lnkIfStmt.newLuaTree(
-    lnkElseIfBranch.newLuaTree(newLuaIdentNode("test"), newLuaIdentNode("test")),
-    lnkElseIfBranch.newLuaTree(newLuaIdentNode("test"), newLuaIdentNode("test")),
-    lnkElseIfBranch.newLuaTree(newLuaIdentNode("test"), newLuaIdentNode("test")),
-    lnkElseIfBranch.newLuaTree(newLuaIdentNode("test"), newLuaIdentNode("test")),
-    lnkElseBranch.newLuaTree(newLuaIdentNode("test")),
-  )
-
-  echo ifTest.toLua(2)

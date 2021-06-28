@@ -86,13 +86,13 @@ proc `[]`*(n: LuaNode, i: int): LuaNode =
 proc `[]`*(n: LuaNode, i: BackwardsIndex): LuaNode =
   n.childNodes[n.len - i.int]
 
-proc `[]=`*(n: var LuaNode, i: int, child: LuaNode) =
+proc `[]=`*(n: LuaNode, i: int, child: LuaNode) =
   n.childNodes[i] = child
 
-proc `[]=`*(n: var LuaNode, i: BackwardsIndex, child: LuaNode): LuaNode =
+proc `[]=`*(n: LuaNode, i: BackwardsIndex, child: LuaNode): LuaNode =
   n.childNodes[n.len - i.int] = child
 
-proc add*(n: var LuaNode, child: LuaNode) =
+proc add*(n: LuaNode, child: LuaNode) =
   n.childNodes.add(child)
 
 iterator items*(n: LuaNode): LuaNode {.inline.} =

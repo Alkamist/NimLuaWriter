@@ -1,336 +1,156 @@
-import std/macros
+import
+  std/macros,
+  std/tables
 
-proc toLua(n: NimNode): string
+type
+  LuaNodeKind* = enum
+    lnkNone, lnkEmpty, lnkIdent, lnkBoolLit,
+    lnkIntLit, lnkFloatLit, lnkStrLit,
+    lnkNilLit, lnkInfix, lnkStmtList
 
-const
-  ScopeBegin = "@SCOPE_BEGIN"
-  ScopeEnd = "@SCOPE_END"
+  LuaNode* = ref object
+    case kind*: LuaNodeKind
+    of lnkNone, lnkEmpty, lnkNilLit: discard
+    of lnkBoolLit: boolVal*: bool
+    of lnkIntLit: intVal*: BiggestInt
+    of lnkFloatLit: floatVal*: BiggestFloat
+    of lnkStrLit, lnkIdent: strVal*: string
+    else: childNodes*: seq[LuaNode]
 
-#=================== Helpers ===================
+const lnkNonTrees = {lnkNone..lnkNilLit}
 
-proc addIndentation(spaces: int, text: string): string =
-  result = ""
+proc toLua*(n: LuaNode): string
 
-  var
-    indentationStr = ""
-    indentationLevel = 0
+proc newLuaNode*(kind: LuaNodeKind): LuaNode =
+  LuaNode(kind: kind)
 
-  for _ in 0 ..< spaces:
-    indentationStr.add(" ")
-
-  template indent(): untyped =
-    for _ in 0..<indentationLevel:
-      result.add(indentationStr)
-
-  var i = 0
-  while i < text.len:
-    let charsTilEof = text.len - i - 1
-
-    if charsTilEof > ScopeBegin.len and
-       text[i ..< i + ScopeBegin.len] == ScopeBegin:
-      indentationLevel += 1
-
-      if i > 0 and text[i - 1] == '\n':
-        indent()
-
-      i += ScopeBegin.len
-
-    elif charsTilEof > ScopeEnd.len and
-         text[i ..< i + ScopeEnd.len] == ScopeEnd:
-      indentationLevel -= 1
-
-      if i > 0 and text[i - 1] == '\n':
-        indent()
-
-      i += ScopeEnd.len
-
-    else:
-      if i > 0 and text[i - 1] == '\n':
-        indent()
-
-      result.add(text[i])
-      i += 1
-
-proc luaTypeDefaultValue(name: string): string =
-  case name:
-  of "": ""
-  of "int": "0"
-  of "float": "0.0"
-  of "bool": "false"
-  of "string": ""
-  else: name & "_init()"
-
-template luaDefaultValueCode(name, value: string): string =
-  "if " & name & " == nil then " & name & " = " & value & " end\n"
-
-template separatedList(firstId, lastId, textGen, separator: untyped): untyped =
-  for i in firstId .. lastId:
-    result.add(textGen(i))
-    if i < lastId:
-      result.add(separator)
-
-proc formalParamsDefs(n: NimNode): string =
-  template generator(i: untyped): untyped = n[i].toLua
-  separatedList(0, n.len - 3, generator, ", ")
-
-proc procDefDefaultValueAssigments(n: NimNode): string =
-  let
-    params = n[3]
-    lastParamId = params.len - 1
-  for paramId in 1 .. lastParamId:
-    let
-      identDefs = params[paramId]
-      defaultValue = identDefs[identDefs.len - 1]
-    if defaultValue.kind != nnkEmpty:
-      let lastIdentId = identDefs.len - 3
-      for identId in 0 .. lastIdentId:
-        result.add(luaDefaultValueCode(identDefs[identId].toLua, defaultValue.toLua))
-
-proc procDefHeader(n: NimNode): string =
-  let
-    header = n[0]
-    params = n[3]
-
-  if header.kind == nnkPostfix:
-    result.add("local function " & header[1].toLua)
+proc newLuaTree*(kind: LuaNodeKind, childNodes: varargs[LuaNode]): LuaNode =
+  case kind:
+  of lnkNonTrees:
+    raise newException(IOError, "Invalid LuaNodeKind for newTree: " & $kind)
   else:
-    result.add("local function " & header.toLua)
+    result = newLuaNode(kind)
+    for child in childNodes:
+      result.childNodes.add(child)
 
-  result.add("(" & params.toLua & ")\n")
+proc newLuaEmptyNode*(): LuaNode =
+  newLuaNode(lnkEmpty)
 
-proc procDefResultDef(n: NimNode): string =
-  let returnType = n[3][0]
-  if returnType.toLua != "":
-    result.add("local result = " & luaTypeDefaultValue(returnType.toLua) & "\n")
-  else:
-    result.add("local result\n")
+proc newLuaNilLit*(): LuaNode =
+  newLuaNode(lnkNilLit)
 
-proc procDefResultReturn(n: NimNode): string =
-  let body = n[6]
-  if body.kind == nnkStmtList:
-    let lastId = body.len - 1
-    if body[lastId].kind != nnkReturnStmt:
-      result.add("return result\n")
+proc newLuaBoolLit*(boolVal: bool): LuaNode =
+  result = newLuaNode(lnkBoolLit)
+  result.boolVal = boolVal
 
-  else:
-    result.add("return result\n")
+proc newLuaIdent*(strVal: string): LuaNode =
+  result = newLuaNode(lnkIdent)
+  result.strVal = strVal
 
-proc elifBranchText(isFirst: bool, cond, body: string): string =
-  if isFirst:
-    result.add("if ")
-  else: result.add("elseif ")
-  result.add(cond & " then\n" &
-             ScopeBegin & body & "\n" &
-             ScopeEnd)
+proc newLuaStrLit*(strVal: string): LuaNode =
+  result = newLuaNode(lnkStrLit)
+  result.strVal = strVal
 
-proc elseBranchText(body: string): string =
-  "else\n" & ScopeBegin & body & "\n" & ScopeEnd
+proc newLuaIntLit*(intVal: int): LuaNode =
+  result = newLuaNode(lnkIntLit)
+  result.intVal = intVal
 
-#=================== NimNodes ===================
+proc newLuaFloatLit*(floatVal: float): LuaNode =
+  result = newLuaNode(lnkFloatLit)
+  result.floatVal = floatVal
 
-proc stmtListToLua(n: NimNode): string =
-  template generator(i: untyped): untyped = n[i].toLua
-  separatedList(0, n.len - 1, generator, "\n")
+proc len*(n: LuaNode): int =
+  n.childNodes.len
 
-proc intLitToLua(n: NimNode): string =
-  $n.intVal
+proc `[]`*(n: LuaNode, i: int): LuaNode =
+  n.childNodes[i]
 
-proc floatLitToLua(n: NimNode): string =
-  $n.floatVal
+proc `[]`*(n: LuaNode, i: BackwardsIndex): LuaNode =
+  n.childNodes[n.len - i.int]
 
-proc strLitToLua(n: NimNode): string =
-  "\"" & n.strVal & "\""
+proc `[]=`*(n: var LuaNode, i: int, v: LuaNode) =
+  n.childNodes[i] = v
 
-proc identToLua(n: NimNode): string =
-  n.strVal
+proc `[]=`*(n: var LuaNode, i: BackwardsIndex, v: LuaNode): LuaNode =
+  n.childNodes[n.len - i.int] = v
 
-proc symToLua(n: NimNode): string =
-  n.strVal
+iterator items*(n: LuaNode): LuaNode {.inline.} =
+  for i in 0 ..< n.len:
+    yield n[i]
 
-proc identDefsToLua(n: NimNode): string =
-  template generator(i: untyped): untyped = n[i].toLua
-  separatedList(0, n.len - 3, generator, ", ")
+iterator pairs*(n: LuaNode): (int, LuaNode) {.inline.} =
+  for i in 0 ..< n.len:
+    yield (i, n[i])
 
-  let assignment = n[n.len - 1]
-  if assignment.kind != nnkEmpty:
-    result.add(" = " & assignment.toLua)
+iterator children*(n: LuaNode): LuaNode {.inline.} =
+  for i in 0 ..< n.len:
+    yield n[i]
 
-proc infixToLua(n: NimNode): string =
-  n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
+######################################################################
+# Code Writing
+######################################################################
 
-proc asgnToLua(n: NimNode): string =
-  template assignStart(): untyped =
-    let variableName {.inject.} = n[0].toLua
+proc lnkInfixToLua*(n: LuaNode): string =
+ n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
 
-    if variableName != "result":
-      result.add("local " & variableName & "\n")
+proc lnkStmtListToLua*(n: LuaNode): string =
+  for i, child in n:
+    result.add(child.toLua)
+    if i < n.len - 1:
+      result.add("\n")
 
-    result.add("do\n" & ScopeBegin)
+######################################################################
 
-  if n[1].kind == nnkStmtListExpr:
-    assignStart()
+macro defineToLua(): untyped =
+  result = nnkProcDef.newTree(
+    nnkPostfix.newTree(ident("*"), ident("toLua")),
+    newEmptyNode(),
+    newEmptyNode(),
+    nnkFormalParams.newTree(
+      ident("string"),
+      nnkIdentDefs.newTree(
+        ident("n"),
+        ident("LuaNode"),
+        newEmptyNode(),
+      ),
+    ),
+    newEmptyNode(),
+    newEmptyNode(),
+    nnkStmtList.newTree(),
+  )
 
-    let
-      expression = n[1]
-      expressionLastIndex = expression.len - 1
+  var cases = quote do:
+    case n.kind:
+    of lnkNone: raise newException(IOError, "Tried to convert invalid Lua node to string.")
+    of lnkEmpty: ""
+    of lnkNilLit: "nil"
+    of lnkBoolLit: $n.boolVal
+    of lnkIntLit: $n.intVal
+    of lnkFloatLit: $n.floatVal
+    of lnkStrLit, lnkIdent: n.strVal
 
-    template generator(i: untyped): untyped = expression[i].toLua
-    separatedList(0, expressionLastIndex - 1, generator, "\n")
+  for kind in LuaNodeKind:
+    if kind notin lnkNonTrees:
+      cases.add(nnkOfBranch.newTree(
+        ident($kind),
+        nnkCall.newTree(
+          nnkDotExpr.newTree(
+            ident("n"),
+            ident($kind & "ToLua"),
+          ),
+        ),
+      ))
 
-    result.add("\n" & variableName & " = " &
-               expression[expressionLastIndex].toLua & "\n" & ScopeEnd & "end")
+  result[6].add(cases)
 
-  elif n[1].kind == nnkIfExpr:
-    assignStart()
+defineToLua()
 
-    let ifExpression = n[1]
+# dumptree:
+#   let a = 5
 
-    for branchId, branch in ifExpression:
-      proc bodyText(body: NimNode): string =
-        let bodyLastId = body.len - 1
-        template generator(i: untyped): untyped = body[i].toLua
-        separatedList(0, bodyLastId - 1, generator, "\n")
-        result.add("\n" & variableName & " = " & body[bodyLastId].toLua)
-
-      if branch.kind == nnkElifBranch:
-        result.add(elifBranchText(branchId == 0, branch[0].toLua, branch[1].bodyText))
-      else:
-        result.add(elseBranchText(branch[0].bodyText))
-
-    result.add("end")
-
-    result.add("\n" & ScopeEnd & "end")
-
-  else:
-    result.add(n[0].toLua & " = " & n[1].toLua)
-
-proc letSectionToLua(n: NimNode): string =
-  template generator(i: untyped): untyped = "local " & n[i].toLua
-  separatedList(0, n.len - 1, generator, "\n")
-
-proc formalParamsToLua(n: NimNode): string =
-  template generator(i: untyped): untyped = n[i].formalParamsDefs
-  separatedList(1, n.len - 1, generator, ", ")
-
-proc procDefToLua(n: NimNode): string =
-  result.add(n.procDefHeader)
-  result.add(ScopeBegin)
-  result.add(n.procDefResultDef)
-  result.add(n.procDefDefaultValueAssigments)
-  result.add(n[6].toLua & "\n")
-  result.add(n.procDefResultReturn)
-  result.add(ScopeEnd)
-  result.add("end")
-
-proc returnStmtToLua(n: NimNode): string =
-  if n[0].kind == nnkAsgn:
-    n[0][0].toLua & " = " & n[0][1].toLua & "\nreturn " & n[0][0].toLua
-  else:
-    "return " & n[0].toLua
-
-proc discardStmtToLua(n: NimNode): string =
-  n[0].toLua
-
-proc callToLua(n: NimNode): string =
-  result.add(n[0].toLua & "(")
-  template generator(i: untyped): untyped = n[i].toLua
-  separatedList(1, n.len - 1, generator, ", ")
-  result.add(")")
-
-proc ifStmtToLua(n: NimNode): string =
-  let lastId = n.len - 1
-  for i in 0 .. lastId:
-    if n[i].kind == nnkElifBranch:
-      result.add(elifBranchText(i == 0, n[i][0].toLua, n[i][1].toLua))
-    else:
-      result.add(elseBranchText(n[i][0].toLua))
-  result.add("end")
-
-# proc bracketToLua(s: var LuaState, n: NimNode): string =
-#   result.add("{")
-
-#   template generator(i: untyped): untyped =
-#     s.toLua(n[i])
-
-#   separatedList(0, n.len - 1, generator, ", ")
-
-#   result.add("}")
-
-# proc bracketExprToLua(s: var LuaState, n: NimNode): string =
-#   s.toLua(n[0]) & "[" & s.toLua(n[1]) & "]"
-
-# proc hiddenStdConvToLua(s: var LuaState, n: NimNode): string =
-#   s.toLua(n[1])
-
-# proc typeSectionToLua(s: var LuaState, n: NimNode): string =
-#   for typeDef in n:
-#     result.add(s.toLua(typeDef))
-
-# proc recListIdentDefsToLua(s: var LuaState, n: NimNode): string =
-#   result.add(s.toLua(n[0]))
-
-#   template generator(i: untyped): untyped =
-#     s.toLua(n[i])
-
-#   separatedList(0, n.len - 3, generator, "\n")
-
-# proc recListToLua(s: var LuaState, n: NimNode): string =
-#   for identDef in n:
-#     template generator(i: untyped): untyped =
-#       s.recListIdentDefsToLua(identDef[i])
-
-#     separatedList(0, n.len - 1, generator, "\n")
-
-# proc typeDefToLua(s: var LuaState, n: NimNode): string =
-#   let typeName = s.toLua(n[0])
-#   let recList = n[2][2]
-
-#   result.add("function " & typeName & "_init()\n")
-
-#   result.add(s.toLua(recList))
-
-#   result.add("end")
-
-# proc objConstrToLua(s: var LuaState, n: NimNode): string =
-#   ""
-#   # s.toLua(n[0]) & ".init()"
-
-proc toLua(n: NimNode): string =
-  case n.kind:
-  of nnkEmpty: ""
-  of nnkTemplateDef: ""
-  of nnkMacroDef: ""
-  of nnkIncludeStmt: ""
-  of nnkStmtList: stmtListToLua(n)
-  of nnkIntLit: intLitToLua(n)
-  of nnkFloatLit: floatLitToLua(n)
-  of nnkStrLit: strLitToLua(n)
-  of nnkIdent: identToLua(n)
-  of nnkSym: symToLua(n)
-  of nnkIdentDefs: identDefsToLua(n)
-  of nnkInfix: infixToLua(n)
-  of nnkAsgn: asgnToLua(n)
-  of nnkLetSection: letSectionToLua(n)
-  of nnkVarSection: letSectionToLua(n)
-  of nnkFormalParams: formalParamsToLua(n)
-  of nnkProcDef: procDefToLua(n)
-  of nnkReturnStmt: returnStmtToLua(n)
-  of nnkDiscardStmt: discardStmtToLua(n)
-  of nnkCall: callToLua(n)
-  of nnkIfStmt: ifStmtToLua(n)
-  of nnkIfExpr: ifStmtToLua(n)
-  # of nnkElifBranch: s.elifBranchToLua(n)
-  # of nnkElse: s.elifBranchToLua(n)
-  # of nnkBracket: s.bracketToLua(n)
-  # of nnkBracketExpr: s.bracketExprToLua(n)
-  # of nnkHiddenStdConv: s.hiddenStdConvToLua(n)
-  # of nnkTypeSection: s.typeSectionToLua(n)
-  # of nnkRecList: s.recListToLua(n)
-  # of nnkTypeDef: s.typeDefToLua(n)
-  # of nnkObjConstr: s.objConstrToLua(n)
-  else: raise newException(IOError, "Unhandled NimNode kind: " & $n.kind)
-
-macro writeLua*(indentationSpaces: static[int], code: typed): untyped =
-  let luaCode = addIndentation(indentationSpaces, code.toLua)
-  echo code.treeRepr
-  result = newStmtList(newStrLitNode(luaCode))
+when isMainModule:
+  var test = lnkStmtList.newLuaTree(
+    lnkInfix.newLuaTree(newLuaIdent("+"), newLuaIdent("a"), newLuaIdent("b")),
+    lnkInfix.newLuaTree(newLuaIdent("+"), newLuaIdent("a"), newLuaIdent("b")),
+  )
+  echo test.toLua

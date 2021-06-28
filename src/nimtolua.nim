@@ -3,13 +3,29 @@ import
   lua
 
 const
-  SupportedNimNodeKinds = {nnkEmpty, nnkStmtList, nnkIncludeStmt,
+  SupportedNimNodeKinds = {nnkEmpty, nnkSym, nnkIntLit, nnkFloatLit,
+                           nnkStrLit, nnkStmtList, nnkIncludeStmt,
                            nnkIdentDefs, nnkLetSection}
 
 proc toLuaNode*(n: NimNode): LuaNode
 
 proc nnkEmptyToLuaNode(n: NimNode): LuaNode =
   newLuaEmptyNode()
+
+proc nnkSymToLuaNode(n: NimNode): LuaNode =
+  newLuaIdentNode(n.strVal)
+
+proc nnkIdentToLuaNode(n: NimNode): LuaNode =
+  newLuaIdentNode(n.strVal)
+
+proc nnkIntLitToLuaNode(n: NimNode): LuaNode =
+  newLuaIntLitNode(n.intVal.int)
+
+proc nnkFloatLitToLuaNode(n: NimNode): LuaNode =
+  newLuaFloatLitNode(n.floatVal.float)
+
+proc nnkStrLitToLuaNode(n: NimNode): LuaNode =
+  newLuaStrLitNode(n.strVal)
 
 proc nnkStmtListToLuaNode(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
@@ -24,7 +40,7 @@ proc nnkIdentDefsToLuaNode(n: NimNode): LuaNode =
   let defaultValue = n[n.len - 1]
   for i in 0 ..< n.len - 2:
     let variableIdent = n[i]
-    result.add(lnkInfix.newTree(
+    result.add(lnkInfix.newLuaTree(
       newLuaIdentNode(lokEquals.toString),
       variableIdent.toLuaNode,
       defaultValue.toLuaNode,
@@ -33,8 +49,7 @@ proc nnkIdentDefsToLuaNode(n: NimNode): LuaNode =
 proc nnkLetSectionToLuaNode(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
   for identDef in n:
-    let defaultValue =
-    #lnkLocal.newLuaTree()
+    result.add(lnkLocal.newLuaTree(identDef.toLuaNode))
 
 ######################################################################
 

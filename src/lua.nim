@@ -5,7 +5,7 @@ import
 
 type
   LuaNodeKind* = enum
-    lnkNone, lnkEmpty, lnkIdent, lnkBoolLit,
+    lnkNone, lnkEmpty, lnkIdent,
     lnkIntLit, lnkFloatLit, lnkStrLit,
     lnkNilLit, lnkInfix, lnkPrefix, lnkStmtList,
     lnkCall, lnkLocal, lnkFnParams, lnkFnDef,
@@ -17,7 +17,6 @@ type
   LuaNode* = ref object
     case kind*: LuaNodeKind
     of lnkNone, lnkEmpty, lnkNilLit: discard
-    of lnkBoolLit: boolVal*: bool
     of lnkIntLit: intVal*: BiggestInt
     of lnkFloatLit: floatVal*: BiggestFloat
     of lnkStrLit, lnkIdent: strVal*: string
@@ -33,7 +32,6 @@ type
     lokLength = "#", lokConcat = "..",
 
 const
-  lnkNonTrees = {lnkNone..lnkNilLit}
   IndentLevelUp = "@INDENT_UP"
   IndentLevelDown = "@INDENT_DOWN"
 
@@ -54,10 +52,6 @@ proc newLuaEmptyNode*(): LuaNode =
 proc newLuaNilLitNode*(): LuaNode =
   newLuaNode(lnkNilLit)
 
-proc newLuaBoolLitNode*(boolVal: bool): LuaNode =
-  result = newLuaNode(lnkBoolLit)
-  result.boolVal = boolVal
-
 proc newLuaIdentNode*(strVal: string): LuaNode =
   result = newLuaNode(lnkIdent)
   result.strVal = strVal
@@ -76,8 +70,8 @@ proc newLuaFloatLitNode*(floatVal: float): LuaNode =
 
 proc newLuaTree*(kind: LuaNodeKind, childNodes: varargs[LuaNode]): LuaNode =
   case kind:
-  of lnkNonTrees:
-    raise newException(IOError, "Invalid LuaNodeKind for newTree: " & $kind)
+  of lnkNone..lnkNilLit:
+    raise newException(IOError, "Invalid LuaNodeKind for newLuaTree: " & $kind)
   else:
     result = newLuaNode(kind)
     for child in childNodes:
@@ -117,6 +111,27 @@ iterator children*(n: LuaNode): LuaNode {.inline.} =
 # Code Writing
 ######################################################################
 
+proc lnkNoneToLua(n: LuaNode): string =
+  raise newException(IOError, "Tried to convert invalid Lua node to string.")
+
+proc lnkEmptyToLua(n: LuaNode): string =
+  ""
+
+proc lnkNilLitToLua(n: LuaNode): string =
+  "nil"
+
+proc lnkIntLitToLua(n: LuaNode): string =
+  $n.intVal
+
+proc lnkFloatLitToLua(n: LuaNode): string =
+  $n.floatVal
+
+proc lnkStrLitToLua(n: LuaNode): string =
+  "\"" & n.strVal & "\""
+
+proc lnkIdentToLua(n: LuaNode): string =
+  n.strVal
+
 proc lnkInfixToLua(n: LuaNode): string =
  n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
 
@@ -138,7 +153,7 @@ proc lnkCallToLua(n: LuaNode): string =
   result.add(")")
 
 proc lnkLocalToLua(n: LuaNode): string =
-  "local " & n.toLua
+  "local " & n[0].toLua
 
 proc lnkFnParamsToLua(n: LuaNode): string =
   result.add("(")
@@ -229,28 +244,23 @@ macro defineToLua(): untyped =
     nnkStmtList.newTree(),
   )
 
-  var cases = quote do:
-    case n.kind:
-    of lnkNone: raise newException(IOError, "Tried to convert invalid Lua node to string.")
-    of lnkEmpty: ""
-    of lnkNilLit: "nil"
-    of lnkBoolLit: $n.boolVal
-    of lnkIntLit: $n.intVal
-    of lnkFloatLit: $n.floatVal
-    of lnkStrLit: "\"" & n.strVal & "\""
-    of lnkIdent: n.strVal
+  var cases = nnkCaseStmt.newTree(
+    nnkDotExpr.newTree(
+      ident("n"),
+      ident("kind"),
+    ),
+  )
 
   for kind in LuaNodeKind:
-    if kind notin lnkNonTrees:
-      cases.add(nnkOfBranch.newTree(
-        ident($kind),
-        nnkCall.newTree(
-          nnkDotExpr.newTree(
-            ident("n"),
-            ident($kind & "ToLua"),
-          ),
+    cases.add(nnkOfBranch.newTree(
+      ident($kind),
+      nnkCall.newTree(
+        nnkDotExpr.newTree(
+          ident("n"),
+          ident($kind & "ToLua"),
         ),
-      ))
+      ),
+    ))
 
   result[6].add(cases)
 

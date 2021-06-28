@@ -6,9 +6,10 @@ type
   LuaNodeKind* = enum
     lnkNone, lnkEmpty, lnkIdent, lnkBoolLit,
     lnkIntLit, lnkFloatLit, lnkStrLit,
-    lnkNilLit, lnkInfix, lnkStmtList,
+    lnkNilLit, lnkInfix, lnkPrefix, lnkStmtList,
     lnkCall, lnkLocal, lnkFnParams, lnkFnDef,
-    lnkDotExpr, lnkReturnStmt
+    lnkDotExpr, lnkReturnStmt, lnkDoStmt,
+    lnkBracketExpr, lnkTableDef, lnkForStmt
 
   LuaNode* = ref object
     case kind*: LuaNodeKind
@@ -21,22 +22,13 @@ type
 
 const
   lnkNonTrees = {lnkNone..lnkNilLit}
-  ScopeBegin = "@SCOPE_BEGIN"
-  ScopeEnd = "@SCOPE_END"
+  IndentLevelUp = "@INDENT_UP"
+  IndentLevelDown = "@INDENT_DOWN"
 
 proc toLua*(n: LuaNode): string
 
 proc newLuaNode*(kind: LuaNodeKind): LuaNode =
   LuaNode(kind: kind)
-
-proc newLuaTree*(kind: LuaNodeKind, childNodes: varargs[LuaNode]): LuaNode =
-  case kind:
-  of lnkNonTrees:
-    raise newException(IOError, "Invalid LuaNodeKind for newTree: " & $kind)
-  else:
-    result = newLuaNode(kind)
-    for child in childNodes:
-      result.childNodes.add(child)
 
 proc newLuaEmptyNode*(): LuaNode =
   newLuaNode(lnkEmpty)
@@ -63,6 +55,15 @@ proc newLuaIntLitNode*(intVal: int): LuaNode =
 proc newLuaFloatLitNode*(floatVal: float): LuaNode =
   result = newLuaNode(lnkFloatLit)
   result.floatVal = floatVal
+
+proc newLuaTree*(kind: LuaNodeKind, childNodes: varargs[LuaNode]): LuaNode =
+  case kind:
+  of lnkNonTrees:
+    raise newException(IOError, "Invalid LuaNodeKind for newTree: " & $kind)
+  else:
+    result = newLuaNode(kind)
+    for child in childNodes:
+      result.childNodes.add(child)
 
 proc len*(n: LuaNode): int =
   n.childNodes.len
@@ -95,16 +96,19 @@ iterator children*(n: LuaNode): LuaNode {.inline.} =
 # Code Writing
 ######################################################################
 
-proc lnkInfixToLua*(n: LuaNode): string =
+proc lnkInfixToLua(n: LuaNode): string =
  n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
 
-proc lnkStmtListToLua*(n: LuaNode): string =
+proc lnkPrefixToLua(n: LuaNode): string =
+ n[0].toLua & n[1].toLua
+
+proc lnkStmtListToLua(n: LuaNode): string =
   for i in 0..<n.len:
     result.add(n[i].toLua)
     if i < n.len - 1:
       result.add("\n")
 
-proc lnkCallToLua*(n: LuaNode): string =
+proc lnkCallToLua(n: LuaNode): string =
   result.add(n[0].toLua & "(")
   for i in 1..<n.len:
     result.add(n[i].toLua)
@@ -112,10 +116,10 @@ proc lnkCallToLua*(n: LuaNode): string =
       result.add(", ")
   result.add(")")
 
-proc lnkLocalToLua*(n: LuaNode): string =
+proc lnkLocalToLua(n: LuaNode): string =
   "local " & n.toLua
 
-proc lnkFnParamsToLua*(n: LuaNode): string =
+proc lnkFnParamsToLua(n: LuaNode): string =
   result.add("(")
   for i in 0..<n.len:
     result.add(n[i].toLua)
@@ -123,16 +127,40 @@ proc lnkFnParamsToLua*(n: LuaNode): string =
       result.add(", ")
   result.add(")")
 
-proc lnkFnDefToLua*(n: LuaNode): string =
-  "function " & n[0].toLua & n[1].toLua & ScopeBegin &
-  n[2].toLua & ScopeEnd &
+proc lnkFnDefToLua(n: LuaNode): string =
+  "function " & n[0].toLua & n[1].toLua & IndentLevelUp &
+  n[2].toLua & IndentLevelDown &
   "end"
 
-proc lnkDotExprToLua*(n: LuaNode): string =
+proc lnkDotExprToLua(n: LuaNode): string =
   n[0].toLua & "." & n[1].toLua
 
-proc lnkReturnStmtToLua*(n: LuaNode): string =
+proc lnkReturnStmtToLua(n: LuaNode): string =
   "return " & n[0].toLua
+
+proc lnkDoStmtToLua(n: LuaNode): string =
+  "do" & IndentLevelUp & n[0].toLua & IndentLevelDown & "end"
+
+proc lnkBracketExprToLua(n: LuaNode): string =
+  n[0].toLua & "[" & n[1].toLua & "]"
+
+proc lnkTableDefToLua(n: LuaNode): string =
+  result.add("{" & IndentLevelUp)
+  for i in 0..<n.len:
+    result.add(n[i].toLua)
+    if i < n.len - 1:
+      result.add(", ")
+  result.add(IndentLevelDown & "}")
+
+proc lnkForStmtToLua(n: LuaNode): string =
+  result.add("for ")
+  result.add(n[0].toLua & ", ")
+  result.add(n[1].toLua)
+  if n[2].kind != lnkEmpty:
+    result.add(", " & n[2].toLua)
+  result.add(" do" & IndentLevelUp)
+  result.add(n[3].toLua)
+  result.add(IndentLevelDown & "end")
 
 ######################################################################
 
@@ -162,7 +190,8 @@ macro defineToLua(): untyped =
     of lnkBoolLit: $n.boolVal
     of lnkIntLit: $n.intVal
     of lnkFloatLit: $n.floatVal
-    of lnkStrLit, lnkIdent: n.strVal
+    of lnkStrLit: "\"" & n.strVal & "\""
+    of lnkIdent: n.strVal
 
   for kind in LuaNodeKind:
     if kind notin lnkNonTrees:
@@ -196,19 +225,19 @@ proc addIndentation(spaces: int, text: string): string =
 
   var i = 0
   while i < text.len:
-    let charsTilEof = text.len - i - 1
+    let charsTilEof = text.len - i
 
-    if charsTilEof > ScopeBegin.len and
-       text[i ..< i + ScopeBegin.len] == ScopeBegin:
+    if charsTilEof >= IndentLevelUp.len and
+       text[i ..< i + IndentLevelUp.len] == IndentLevelUp:
       indentationLevel += 1
-      i += ScopeBegin.len
+      i += IndentLevelUp.len
       result.add("\n")
       indent()
 
-    elif charsTilEof > ScopeEnd.len and
-         text[i ..< i + ScopeEnd.len] == ScopeEnd:
+    elif charsTilEof >= IndentLevelDown.len and
+         text[i ..< i + IndentLevelDown.len] == IndentLevelDown:
       indentationLevel -= 1
-      i += ScopeEnd.len
+      i += IndentLevelDown.len
       result.add("\n")
       indent()
 
@@ -225,7 +254,7 @@ proc toLua*(n: LuaNode, indentationSpaces: int): string =
 ######################################################################
 
 when isMainModule:
-  var test = lnkFnDef.newLuaTree(
+  var functionDef = lnkFnDef.newLuaTree(
     newLuaIdentNode("testFn"),
     lnkFnParams.newLuaTree(
       newLuaIdentNode("a"),
@@ -240,4 +269,15 @@ when isMainModule:
       ),
     ),
   )
-  echo test.toLua(2)
+
+  var forLoop = lnkForStmt.newLuaTree(
+    lnkInfix.newLuaTree(newLuaIdentNode("="), newLuaIdentNode("i"), newLuaIntLitNode(1)),
+    lnkPrefix.newLuaTree(
+      newLuaIdentNode("#"),
+      newLuaIdentNode("z"),
+    ),
+    newLuaEmptyNode(),
+    functionDef,
+  )
+
+  echo forLoop.toLua(2)

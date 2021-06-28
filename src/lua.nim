@@ -25,7 +25,7 @@ type
 
   LuaOperatorKind* = enum
     lokPlus = "+", lokMinus = "-", lokStar = "*", lokSlash = "/",
-    lokMod = "%", lokExponent = "^",
+    lokMod = "%", lokCaret = "^",
     lokEquals = "=", lokNotEquals = "~=", lokEqualsEquals = "==",
     lokGreater = ">", lokGreaterEquals = ">=",
     lokLesser = "<", lokLesserEquals = "<=",
@@ -40,7 +40,10 @@ const
 proc toLua*(n: LuaNode): string
 
 proc toString*(kind: LuaOperatorKind): string =
-  parseEnum[LuaOperatorKind](kind)
+  $kind
+
+proc toLuaOperatorKind*(text: string): LuaOperatorKind =
+  parseEnum[LuaOperatorKind](text)
 
 proc newLuaNode*(kind: LuaNodeKind): LuaNode =
   LuaNode(kind: kind)

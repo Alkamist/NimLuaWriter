@@ -164,8 +164,8 @@ proc lnkFnParamsToLua(n: LuaNode): string =
   result.add(")")
 
 proc lnkFnDefToLua(n: LuaNode): string =
-  "function " & n[0].toLua & n[1].toLua & IndentLevelUp &
-  n[2].toLua & IndentLevelDown &
+  "function" & n[0].toLua & IndentLevelUp &
+  n[1].toLua & IndentLevelDown &
   "end"
 
 proc lnkDotExprToLua(n: LuaNode): string =

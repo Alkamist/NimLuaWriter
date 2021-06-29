@@ -1,8 +1,13 @@
-let a = block:
-  let b = block:
-    let c = 1
-    if true: c else: 0
+let
+  value = 1
+  a = case value:
+      of 0: 2
+      of 1: 3
+      else: 4
 
-  if true: b else: 0
-
-let b = if true: 1 else: 0
+# if value == 0:
+#   a = 2
+# elif value == 1:
+#   a = 3
+# else:
+#   a = 4

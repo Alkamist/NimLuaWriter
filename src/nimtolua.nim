@@ -4,16 +4,14 @@ import
 
 const
   SupportedNimNodeKinds = {nnkEmpty, nnkSym, nnkIntLit, nnkFloatLit,
-                           nnkStrLit, nnkStmtList, nnkIncludeStmt,
+                           nnkStrLit, nnkStmtList, nnkStmtListExpr,
+                           nnkBlockExpr, nnkIncludeStmt,
                            nnkLetSection, nnkVarSection,
-                           nnkIfStmt, nnkElifBranch, nnkElse,
+                           nnkIfStmt, nnkIfExpr, nnkElifBranch,
+                           nnkElifExpr, nnkElse, nnkElseExpr,
                            nnkInfix, nnkAsgn}
 
 proc toLuaNode*(n: NimNode): LuaNode
-proc nnkElifBranchToLuaNode(n: NimNode): LuaNode
-proc nnkElseToLuaNode(n: NimNode): LuaNode
-proc nnkStmtListToLuaNode(n: NimNode): LuaNode
-proc luaExpression(n: NimNode, varName: string): LuaNode
 
 ######################################################################
 # Helpers
@@ -37,52 +35,44 @@ proc nnkIdentDefsAssignments(n: NimNode): LuaNode =
         defaultValue.toLuaNode,
       ))
 
-proc nnkIfExprToLuaNode(n: NimNode, varName: string): LuaNode =
-  var ifStatement = lnkIfStmt.newLuaTree()
+proc convertToExpression(n: LuaNode, varName: string): LuaNode =
+  var expression = n
 
-  for branch in n:
-    case branch.kind:
-    of [nnkElifExpr, nnkElifBranch]: ifStatement.add(branch.nnkElifBranchToLuaNode)
-    of [nnkElseExpr, nnkElse]: ifStatement.add(branch.nnkElseToLuaNode)
-    else: discard
+  case expression.kind:
 
-  for i, branch in ifStatement:
-    let lastId = branch.len - 1
+  of lnkStmtList:
+    let lastId = expression.len - 1
     if lastId >= 0:
-      ifStatement[i][lastId] = lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEquals.toString),
-        newLuaIdentNode(varName),
-        branch[lastId],
-      )
+      if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
+        expression[lastId] = expression[lastId].convertToExpression(varName)
+      else:
+        expression[lastId] = lnkInfix.newLuaTree(
+          newLuaIdentNode(lokEquals.toString),
+          newLuaIdentNode(varName),
+          expression[lastId],
+        )
 
-  result = lnkDoStmt.newLuaTree(ifStatement)
+  of lnkIfStmt:
+    for i, branch in expression:
+      let lastId = branch.len - 1
+      if lastId >= 0:
+        if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
+          expression[i][lastId] = branch[lastId].convertToExpression(varName)
+        else:
+          expression[i][lastId] = lnkInfix.newLuaTree(
+            newLuaIdentNode(lokEquals.toString),
+            newLuaIdentNode(varName),
+            branch[lastId],
+          )
 
-proc nnkStmtListExprToLuaNode(n: NimNode, varName: string): LuaNode =
-  let
-    statementList = n.nnkStmtListToLuaNode
-    lastId = statementList.len - 1
-  if lastId >= 0:
-    statementList[lastId] = lnkInfix.newLuaTree(
+  else:
+    expression = lnkInfix.newLuaTree(
       newLuaIdentNode(lokEquals.toString),
       newLuaIdentNode(varName),
-      statementList[lastId],
+      expression,
     )
 
-  result = lnkDoStmt.newLuaTree(statementList)
-
-proc nnkBlockExprToLuaNode(n: NimNode, varName: string): LuaNode =
-  n[1].luaExpression(varName)
-
-proc luaExpression(n: NimNode, varName: string): LuaNode =
-  case n.kind:
-  of nnkIfExpr: n.nnkIfExprToLuaNode(varName)
-  of nnkStmtListExpr: n.nnkStmtListExprToLuaNode(varName)
-  of nnkBlockExpr: n.nnkBlockExprToLuaNode(varName)
-  else: lnkInfix.newLuaTree(
-    newLuaIdentNode(lokEquals.toString),
-    newLuaIdentNode(varName),
-    n.toLuaNode,
-  )
+  result = lnkDoStmt.newLuaTree(expression)
 
 ######################################################################
 # Nim Nodes
@@ -111,6 +101,12 @@ proc nnkStmtListToLuaNode(n: NimNode): LuaNode =
   for child in n:
     result.add(child.toLuaNode)
 
+proc nnkStmtListExprToLuaNode(n: NimNode): LuaNode =
+  n.nnkStmtListToLuaNode
+
+proc nnkBlockExprToLuaNode(n: NimNode): LuaNode =
+  n[1].toLuaNode
+
 proc nnkIncludeStmtToLuaNode(n: NimNode): LuaNode =
   newLuaEmptyNode()
 
@@ -122,7 +118,7 @@ proc nnkLetSectionToLuaNode(n: NimNode): LuaNode =
     for varId in 0 ..< identDef.len - 2:
       if assignments[varId].kind != lnkInfix:
         let varName = identDef[varId].strVal
-        result.add(identDef[2].luaExpression(varName))
+        result.add(identDef[2].toLuaNode.convertToExpression(varName))
 
 proc nnkVarSectionToLuaNode(n: NimNode): LuaNode =
   n.nnkLetSectionToLuaNode
@@ -132,13 +128,22 @@ proc nnkIfStmtToLuaNode(n: NimNode): LuaNode =
   for child in n:
     result.add(child.toLuaNode)
 
+proc nnkIfExprToLuaNode(n: NimNode): LuaNode =
+  n.nnkIfStmtToLuaNode
+
 proc nnkElifBranchToLuaNode(n: NimNode): LuaNode =
   result = lnkElseIfBranch.newLuaTree()
   for child in n:
     result.add(child.toLuaNode)
 
+proc nnkElifExprToLuaNode(n: NimNode): LuaNode =
+  n.nnkElifBranchToLuaNode
+
 proc nnkElseToLuaNode(n: NimNode): LuaNode =
   lnkElseBranch.newLuaTree(n[0].toLuaNode)
+
+proc nnkElseExprToLuaNode(n: NimNode): LuaNode =
+  n.nnkElseToLuaNode
 
 proc nnkInfixToLuaNode(n: NimNode): LuaNode =
   result = lnkInfix.newLuaTree()

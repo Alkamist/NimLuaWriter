@@ -12,7 +12,7 @@ const
                            nnkElifExpr, nnkElse, nnkElseExpr,
                            nnkInfix, nnkAsgn, nnkTypeSection,
                            nnkTypeDef, nnkCaseStmt, nnkProcDef,
-                           nnkReturnStmt}
+                           nnkReturnStmt, nnkFormalParams}
 
 proc toLuaNode*(n: NimNode): LuaNode
 
@@ -20,7 +20,7 @@ proc toLuaNode*(n: NimNode): LuaNode
 # Helpers
 ######################################################################
 
-proc nnkIdentDefsAssignments(n: NimNode): LuaNode =
+proc identDefsAssignments(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
 
   let defaultValue = n[n.len - 1]
@@ -78,6 +78,51 @@ proc convertToExpression(n: LuaNode, varName: string): LuaNode =
 
   result = lnkDoStmt.newLuaTree(expression)
 
+proc stmtListHasEarlyReturn(n: NimNode): bool =
+  for child in n:
+    case child.kind:
+    of nnkReturnStmt: return true
+    of nnkStmtList: result = child.stmtListHasEarlyReturn
+    else: discard
+
+proc procDefHasEarlyReturn(n: NimNode): bool =
+  let body = n[6]
+  case body.kind:
+  of nnkReturnStmt: true
+  of nnkStmtList: body.stmtListHasEarlyReturn
+  else: false
+
+proc luaDefaultValueInit(variable: LuaNode, defaultValue: LuaNode): LuaNode =
+  result = lnkIfStmt.newLuaTree(
+    lnkElseIfBranch.newLuaTree(
+      lnkInfix.newLuaTree(
+        newLuaIdentNode(lokEqualsEquals.toString),
+        variable,
+        newLuaNilLitNode(),
+      ),
+      lnkInfix.newLuaTree(
+        newLuaIdentNode(lokEquals.toString),
+        variable,
+        defaultValue,
+      ),
+    ),
+  )
+
+proc formalParamsProcDefDefaults(n: NimNode): LuaNode =
+  result = lnkStmtList.newLuaTree()
+
+  let lastIdentDefId = n.len - 1
+  for identDefId in 1 .. lastIdentDefId:
+    let
+      identDef = n[identDefId]
+      defaultValue = identDef[identDef.len - 1]
+      lastVarNameId = identDef.len - 3
+
+    for varNameId in 0 .. lastVarNameId:
+      let varName = identDef[varNameId]
+      result.add(luaDefaultValueInit(varName.toLuaNode, defaultValue.toLuaNode))
+
+
 ######################################################################
 # Nim Nodes
 ######################################################################
@@ -117,7 +162,7 @@ proc nnkIncludeStmtToLuaNode(n: NimNode): LuaNode =
 proc nnkLetSectionToLuaNode(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
   for identDef in n:
-    let assignments = identDef.nnkIdentDefsAssignments
+    let assignments = identDef.identDefsAssignments
     result.add(lnkLocal.newLuaTree(assignments))
     for varId in 0 ..< identDef.len - 2:
       if assignments[varId].kind != lnkInfix:
@@ -187,30 +232,26 @@ proc nnkCaseStmtToLuaNode(n: NimNode): LuaNode =
       result.add(n[i].toLuaNode)
 
 proc nnkProcDefToLuaNode(n: NimNode): LuaNode =
-  let functionName = n[0].toLuaNode
-  var functionParams = lnkFnParams.newLuaTree()
-
   let
-    formalParams = n[3]
-    lastParamId = formalParams.len - 1
-  for paramId in 1 .. lastParamId:
-    let identDef = formalParams[paramId]
-    for paramNameId in 0 .. identDef.len - 3:
-      let paramName = identDef[paramNameId]
-      functionParams.add(paramName.toLuaNode)
+    functionName = n[0].toLuaNode
+    functionHasResult = n[3][0].kind != nnkEmpty
 
-  var functionBody: LuaNode
-  let functionHasResult = formalParams[0].kind != nnkEmpty
+  var
+    functionParams = n[3].toLuaNode
+    functionBody = lnkStmtList.newLuaTree(n[3].formalParamsProcDefDefaults)
 
   if functionHasResult:
     let resultName = n[7].toLuaNode
-    functionBody = lnkStmtList.newLuaTree(
-      lnkLocal.newLuaTree(resultName),
-      lnkDoStmt.newLuaTree(n[6].toLuaNode),
-      lnkReturnStmt.newLuaTree(resultName),
-    )
+    functionBody.add(lnkLocal.newLuaTree(resultName))
+
+    if n.procDefHasEarlyReturn:
+      functionBody.add(n[6].toLuaNode)
+    else:
+      functionBody.add(lnkDoStmt.newLuaTree(n[6].toLuaNode))
+      functionBody.add(lnkReturnStmt.newLuaTree(resultName))
+
   else:
-    functionBody = n[6].toLuaNode
+    functionBody.add(n[6].toLuaNode)
 
   result = lnkLocal.newLuaTree(
     lnkInfix.newLuaTree(
@@ -225,6 +266,15 @@ proc nnkReturnStmtToLuaNode(n: NimNode): LuaNode =
     lnkReturnStmt.newLuaTree(n[0][1].toLuaNode)
   else:
     lnkReturnStmt.newLuaTree(n[0].toLuaNode)
+
+proc nnkFormalParamsToLuaNode(n: NimNode): LuaNode =
+  result = lnkFnParams.newLuaTree()
+  let lastParamId = n.len - 1
+  for paramId in 1 .. lastParamId:
+    let identDef = n[paramId]
+    for paramNameId in 0 .. identDef.len - 3:
+      let paramName = identDef[paramNameId]
+      result.add(paramName.toLuaNode)
 
 ######################################################################
 

@@ -12,7 +12,8 @@ const
                            nnkElifExpr, nnkElse, nnkElseExpr,
                            nnkInfix, nnkAsgn, nnkTypeSection,
                            nnkTypeDef, nnkCaseStmt, nnkProcDef,
-                           nnkReturnStmt, nnkFormalParams}
+                           nnkReturnStmt, nnkFormalParams, nnkDiscardStmt,
+                           nnkCall}
 
 proc toLuaNode*(n: NimNode): LuaNode
 
@@ -121,7 +122,6 @@ proc formalParamsProcDefDefaults(n: NimNode): LuaNode =
     for varNameId in 0 .. lastVarNameId:
       let varName = identDef[varNameId]
       result.add(luaDefaultValueInit(varName.toLuaNode, defaultValue.toLuaNode))
-
 
 ######################################################################
 # Nim Nodes
@@ -275,6 +275,14 @@ proc nnkFormalParamsToLuaNode(n: NimNode): LuaNode =
     for paramNameId in 0 .. identDef.len - 3:
       let paramName = identDef[paramNameId]
       result.add(paramName.toLuaNode)
+
+proc nnkDiscardStmtToLuaNode(n: NimNode): LuaNode =
+  n[0].toLuaNode
+
+proc nnkCallToLuaNode(n: NimNode): LuaNode =
+  result = lnkCall.newLuaTree()
+  for child in n:
+    result.add(child.toLuaNode)
 
 ######################################################################
 

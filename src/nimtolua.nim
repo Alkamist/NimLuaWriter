@@ -197,7 +197,8 @@ proc nnkStrLitToLuaNode(n: NimNode): LuaNode =
 proc nnkStmtListToLuaNode(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
   for child in n:
-    result.add(child.toLuaNode)
+    if child.kind != nnkEmpty:
+      result.add(child.toLuaNode)
 
 proc nnkStmtListExprToLuaNode(n: NimNode): LuaNode =
   n.nnkStmtListToLuaNode
@@ -272,28 +273,35 @@ proc nnkTypeDefToLuaNode(n: NimNode): LuaNode =
     objectTy = n[2]
     recList = objectTy[2]
 
-  var tableDef = lnkTableDef.newLuaTree()
+  var assignments = lnkStmtList.newLuaTree()
 
   for identDef in recList:
     let defaultValue = identDef.identDefValue
+
     for varName in identDef.identDefVars:
-      if defaultValue.kind != nnkEmpty:
-        tableDef.add(lnkInfix.newLuaTree(
+      if defaultValue.kind == nnkEmpty:
+        assignments.add(lnkInfix.newLuaTree(
+          newLuaIdentNode(lokEquals.toString),
+          varName.toLuaNode,
+          identDef.identDefType.strVal.typeDefaultValue,
+        ))
+
+      else:
+        assignments.add(lnkInfix.newLuaTree(
           newLuaIdentNode(lokEquals.toString),
           varName.toLuaNode,
           defaultValue.toLuaNode,
         ))
-      else:
-        tableDef.add(varName.toLuaNode)
 
   var functionBody = lnkStmtList.newLuaTree(
     lnkLocal.newLuaTree(
       lnkInfix.newLuaTree(
         newLuaIdentNode(lokEquals.toString),
         newLuaIdentNode("self"),
-        tableDef,
+        lnkTableDef.newLuaTree(),
       ),
     ),
+    assignments,
     lnkReturnStmt.newLuaTree(
       newLuaIdentNode("self"),
     ),

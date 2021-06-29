@@ -184,12 +184,15 @@ proc lnkBracketExprToLua(n: LuaNode): string =
   n[0].toLua & "[" & n[1].toLua & "]"
 
 proc lnkTableDefToLua(n: LuaNode): string =
-  result.add("{" & IndentLevelUp)
-  for i in 0..<n.len:
+  let length = n.len
+  result.add("{")
+  if length > 0: result.add(IndentLevelUp)
+  for i in 0 ..< length:
     result.add(n[i].toLua)
-    if i < n.len - 1:
+    if i < length - 1:
       result.add(",\n")
-  result.add(IndentLevelDown & "}")
+  if length > 0: result.add(IndentLevelDown)
+  result.add("}")
 
 proc lnkForStmtToLua(n: LuaNode): string =
   result.add("for ")

@@ -21,6 +21,14 @@ proc toLuaNode*(n: NimNode): LuaNode
 # Helpers
 ######################################################################
 
+proc typeDefaultValue(typeName: string): LuaNode =
+  case typeName:
+  of "int": newLuaIntLitNode(0)
+  of "float": newLuaFloatLitNode(0.0)
+  of "string": newLuaStrLitNode("")
+  of "bool": newLuaIdentNode("false")
+  else: newLuaIdentNode(typeName)
+
 proc convertToExpression(n: LuaNode, varName: string): LuaNode =
   var expression = n
 
@@ -117,10 +125,15 @@ proc identDefsAssignments(n: NimNode): LuaNode =
   let defaultValue = n.identDefValue
 
   for varName in n.identDefVars:
-    if defaultValue.kind == nnkEmpty or
-       defaultValue.kind in DoExprs:
+    case defaultValue.kind:
+    of DoExprs:
       result.add(varName.toLuaNode)
-
+    of nnkEmpty:
+      result.add(lnkInfix.newLuaTree(
+        newLuaIdentNode(lokEquals.toString),
+        varName.toLuaNode,
+        n.identDefType.strVal.typeDefaultValue,
+      ))
     else:
       result.add(lnkInfix.newLuaTree(
         newLuaIdentNode(lokEquals.toString),
@@ -130,10 +143,16 @@ proc identDefsAssignments(n: NimNode): LuaNode =
 
 proc formalParamsProcDefDefaults(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
+
   for identDef in n.formalParamsIdentDefs:
     let defaultValue = identDef.identDefValue
+
     for varName in identDef.identDefVars:
-      result.add(luaDefaultValueInit(varName.toLuaNode, defaultValue.toLuaNode))
+      case defaultValue.kind:
+      of nnkEmpty:
+        result.add(luaDefaultValueInit(varName.toLuaNode, identDef.identDefType.strVal.typeDefaultValue))
+      else:
+        result.add(luaDefaultValueInit(varName.toLuaNode, defaultValue.toLuaNode))
 
 # proc nnkObjConstrAssignments(n: NimNode, varName: string): LuaNode =
 #   result = lnkStmtList.newLuaTree(

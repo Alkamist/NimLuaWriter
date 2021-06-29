@@ -13,7 +13,7 @@ const
                            nnkInfix, nnkAsgn, nnkTypeSection,
                            nnkTypeDef, nnkCaseStmt, nnkProcDef,
                            nnkReturnStmt, nnkFormalParams, nnkDiscardStmt,
-                           nnkCall}
+                           nnkCall, nnkDotExpr}
 
 proc toLuaNode*(n: NimNode): LuaNode
 
@@ -409,6 +409,11 @@ proc nnkDiscardStmtToLuaNode(n: NimNode): LuaNode =
 
 proc nnkCallToLuaNode(n: NimNode): LuaNode =
   result = lnkCall.newLuaTree()
+  for child in n:
+    result.add(child.toLuaNode)
+
+proc nnkDotExprToLuaNode(n: NimNode): LuaNode =
+  result = lnkDotExpr.newLuaTree()
   for child in n:
     result.add(child.toLuaNode)
 

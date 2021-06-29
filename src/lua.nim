@@ -133,16 +133,17 @@ proc lnkIdentToLua(n: LuaNode): string =
   n.strVal
 
 proc lnkInfixToLua(n: LuaNode): string =
- n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
+  n[1].toLua & " " & n[0].toLua & " " & n[2].toLua
 
 proc lnkPrefixToLua(n: LuaNode): string =
- n[0].toLua & n[1].toLua
+  n[0].toLua & n[1].toLua
 
 proc lnkStmtListToLua(n: LuaNode): string =
-  for i in 0..<n.len:
-    result.add(n[i].toLua)
-    if i < n.len - 1:
-      result.add("\n")
+  for i in 0 ..< n.len:
+    if n[i].kind != lnkEmpty:
+      result.add(n[i].toLua)
+      if i < n.len - 1:
+        result.add("\n")
 
 proc lnkCallToLua(n: LuaNode): string =
   result.add(n[0].toLua & "(")

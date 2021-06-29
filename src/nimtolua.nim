@@ -4,7 +4,7 @@ import
 
 const
   DoExprs = {nnkCaseStmt, nnkIfExpr, nnkStmtListExpr, nnkBlockExpr}
-  SupportedNimNodeKinds = {nnkEmpty, nnkSym, nnkIntLit, nnkFloatLit,
+  SupportedNimNodeKinds = {nnkEmpty, nnkSym, nnkIdent, nnkIntLit, nnkFloatLit,
                            nnkStrLit, nnkStmtList, nnkStmtListExpr,
                            nnkBlockExpr, nnkIncludeStmt,
                            nnkLetSection, nnkVarSection,
@@ -123,6 +123,16 @@ proc formalParamsProcDefDefaults(n: NimNode): LuaNode =
       let varName = identDef[varNameId]
       result.add(luaDefaultValueInit(varName.toLuaNode, defaultValue.toLuaNode))
 
+proc nnkIdentDefVars(n: NimNode): seq[NimNode] =
+  for i in 0 ..< n.len - 2:
+    result.add(n[i])
+
+proc nnkIdentDefType(n: NimNode): NimNode =
+  n[n.len - 2]
+
+proc nnkIdentDefValue(n: NimNode): NimNode =
+  n[n.len - 1]
+
 ######################################################################
 # Nim Nodes
 ######################################################################
@@ -211,10 +221,53 @@ proc nnkAsgnToLuaNode(n: NimNode): LuaNode =
     )
 
 proc nnkTypeSectionToLuaNode(n: NimNode): LuaNode =
-  n[0].toLuaNode
+  result = lnkStmtList.newLuaTree()
+  for child in n:
+    result.add(child.toLuaNode)
 
 proc nnkTypeDefToLuaNode(n: NimNode): LuaNode =
-  n[0].toLuaNode
+  let
+    typeName = n[0]
+    objectTy = n[2]
+    recList = objectTy[2]
+
+  var tableDef = lnkTableDef.newLuaTree()
+
+  for identDef in recList:
+    let defaultValue = identDef.nnkIdentDefValue
+    for varName in identDef.nnkIdentDefVars:
+      if defaultValue.kind != nnkEmpty:
+        tableDef.add(lnkInfix.newLuaTree(
+          newLuaIdentNode(lokEquals.toString),
+          varName.toLuaNode,
+          defaultValue.toLuaNode,
+        ))
+      else:
+        tableDef.add(varName.toLuaNode)
+
+  var functionBody = lnkStmtList.newLuaTree(
+    lnkLocal.newLuaTree(
+      lnkInfix.newLuaTree(
+        newLuaIdentNode(lokEquals.toString),
+        newLuaIdentNode("self"),
+        tableDef,
+      ),
+    ),
+    lnkReturnStmt.newLuaTree(
+      newLuaIdentNode("self"),
+    ),
+  )
+
+  result = lnkLocal.newLuaTree(
+    lnkInfix.newLuaTree(
+      newLuaIdentNode(lokEquals.toString),
+      typeName.toLuaNode,
+      lnkFnDef.newLuaTree(
+        lnkFnParams.newLuaTree(),
+        functionBody,
+      ),
+    ),
+  )
 
 proc nnkCaseStmtToLuaNode(n: NimNode): LuaNode =
   result = lnkIfStmt.newLuaTree()

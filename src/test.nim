@@ -1,4 +1,7 @@
-proc test(a, b = 1): int =
-  a + b
+type
+  Point2d = object
+    x, y: float
 
-discard test(1, 1)
+  Point3d = object
+    x, y: float
+    z: float

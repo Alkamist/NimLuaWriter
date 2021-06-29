@@ -188,7 +188,7 @@ proc lnkTableDefToLua(n: LuaNode): string =
   for i in 0..<n.len:
     result.add(n[i].toLua)
     if i < n.len - 1:
-      result.add(", ")
+      result.add(",\n")
   result.add(IndentLevelDown & "}")
 
 proc lnkForStmtToLua(n: LuaNode): string =

@@ -9,8 +9,8 @@ const
                            nnkStrLit, nnkStmtList, nnkIncludeStmt,
                            nnkLetSection, nnkVarSection,
                            nnkInfix, nnkAsgn, nnkIdentDefs, nnkFormalParams,
-                           nnkProcDef, nnkBlockStmt, nnkDiscardStmt, nnkCall,
-                           nnkHiddenStdConv}
+                           nnkProcDef, nnkBlockStmt, nnkDiscardStmt,
+                           nnkHiddenStdConv, nnkCall}
 
 type
   NimToLuaState = object
@@ -18,57 +18,64 @@ type
     procReturnTypeStrs: Table[string, string]
 
 proc toLuaNode*(s: var NimToLuaState, n: NimNode): LuaNode
+proc typeStr(s: var NimToLuaState, n: NimNode): string
 
 ######################################################################
 # NimNode Children
 ######################################################################
 
-proc identDefVars(n: NimNode): seq[NimNode] =
+template identDefVars(n: NimNode): untyped =
   n[0..<n.len-2]
 
-proc identDefType(n: NimNode): NimNode =
+template identDefType(n: NimNode): untyped =
   n[n.len-2]
 
-proc identDefValue(n: NimNode): NimNode =
+template identDefValue(n: NimNode): untyped =
   n[n.len-1]
 
-proc objConstrValues(n: NimNode): seq[NimNode] =
+template objConstrValues(n: NimNode): untyped =
   n[1..<n.len]
 
-proc formalParamsIdentDefs(n: NimNode): seq[NimNode] =
+template formalParamsIdentDefs(n: NimNode): untyped =
   n[1..<n.len]
 
-proc formalParamsIdentDefsTypes(n: NimNode): seq[NimNode] =
-  for identDef in n.formalParamsIdentDefs:
-    result.add(identDef.identDefType)
-
-proc formalParamsReturnType(n: NimNode): NimNode =
+template formalParamsReturnType(n: NimNode): untyped =
   n[0]
 
-proc procDefName(n: NimNode): NimNode =
+template procDefName(n: NimNode): untyped =
   n[0]
 
-proc procDefFormalParams(n: NimNode): NimNode =
+template procDefFormalParams(n: NimNode): untyped =
   n[3]
 
-proc procDefBody(n: NimNode): NimNode =
+template procDefBody(n: NimNode): untyped =
   n[6]
 
 proc procDefResultName(n: NimNode): Option[NimNode] =
   if n.procDefFormalParams[0].kind != nnkEmpty:
     return some(n[7])
 
-proc callName(n: NimNode): NimNode =
+template callName(n: NimNode): untyped =
   n[0]
 
-proc callValues(n: NimNode): seq[NimNode] =
+template callValues(n: NimNode): untyped =
   n[1..<n.len]
 
 ######################################################################
 # Helpers
 ######################################################################
 
-proc typeStr(n: NimNode): string =
+proc callNameResolvedStr(s: var NimToLuaState, n: NimNode): string =
+  result = n.callName.strVal
+
+  for callValue in n.callValues:
+    result.add("_")
+    if callValue.kind == nnkCall:
+      result.add(s.procReturnTypeStrs[s.callNameResolvedStr(callValue)])
+    else:
+      result.add(s.typeStr(callValue))
+
+proc typeStr(s: var NimToLuaState, n: NimNode): string =
   case n.kind:
   of nnkIntLit: "int"
   of nnkFloatLit: "float"
@@ -79,17 +86,21 @@ proc typeStr(n: NimNode): string =
   of nnkHiddenStdConv:
     if n[1].kind == nnkIntLit: "float"
     else: "UNKNOWN_TYPE"
+  of nnkCall: s.procReturnTypeStrs[s.callNameResolvedStr(n)]
   else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
-proc callNameStrResolved(s: var NimToLuaState, n: NimNode): string =
-  result = n.callName.strVal
-
-  for callValue in n.callValues:
-    result.add("_")
-    if callValue.kind == nnkCall:
-      result.add(s.procReturnTypeStrs[s.callNameStrResolved(callValue)])
+proc formalParamsIdentDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
+  for identDef in n.formalParamsIdentDefs:
+    if identDef.identDefType.kind != nnkEmpty:
+      result.add(s.typeStr(identDef.identDefType))
     else:
-      result.add(callValue.typeStr)
+      result.add(s.typeStr(identDef.identDefValue))
+
+proc procDefNameResolvedStr(s: var NimToLuaState, n: NimNode): string =
+  result = n.procDefName.strVal
+
+  for typeStr in s.formalParamsIdentDefsTypeStrs(n.procDefFormalParams):
+    result.add("_" & typeStr)
 
 ######################################################################
 # NimNode To LuaNode
@@ -166,11 +177,7 @@ proc nnkFormalParamsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.isInFormalParams = wasInFormalParams
 
 proc nnkProcDefToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  var procDefNameStr = n.procDefName.strVal
-
-  for paramType in n.procDefFormalParams.formalParamsIdentDefsTypes:
-    procDefNameStr.add("_" & paramType.strVal)
-
+  var procDefNameStr = s.procDefNameResolvedStr(n)
   s.procReturnTypeStrs[procDefNameStr] = n.procDefFormalParams.formalParamsReturnType.strVal
 
   var
@@ -198,7 +205,7 @@ proc nnkDiscardStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.toLuaNode(n[0])
 
 proc nnkCallToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  result = luaCall(luaIdent(s.callNameStrResolved(n)))
+  result = luaCall(luaIdent(s.callNameResolvedStr(n)))
   for callValue in n.callValues:
     result.add(s.toLuaNode(callValue))
 

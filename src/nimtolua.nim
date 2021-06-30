@@ -10,7 +10,7 @@ const
                            nnkLetSection, nnkVarSection,
                            nnkInfix, nnkAsgn, nnkIdentDefs, nnkFormalParams,
                            nnkProcDef, nnkBlockStmt, nnkDiscardStmt,
-                           nnkHiddenStdConv, nnkCall}
+                           nnkHiddenStdConv, nnkCall, nnkConv}
 
 type
   NimToLuaState = object
@@ -86,6 +86,7 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string =
   of nnkHiddenStdConv:
     if n[1].kind == nnkIntLit: "float"
     else: "UNKNOWN_TYPE"
+  of nnkConv: n[0].strVal
   of nnkCall: s.procReturnTypeStrs[s.callNameResolvedStr(n)]
   else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
@@ -212,6 +213,14 @@ proc nnkCallToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
 
 proc nnkHiddenStdConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.toLuaNode(n[1])
+
+proc nnkConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  case n[0].strVal:
+  # of "int":
+  # of "float":
+  # of "string":
+  of "bool": luaCall(luaIdent("NIM_TO_BOOL"), s.toLuaNode(n[1]))
+  else: s.toLuaNode(n[1])
 
 ######################################################################
 

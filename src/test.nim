@@ -10,3 +10,8 @@ proc test(a = true): float =
   a.float
 
 discard a.float
+
+
+let b = 0
+
+discard b.float

@@ -16,6 +16,7 @@ type
   NimToLuaState = object
     isInFormalParams: bool
     procReturnTypeStrs: Table[string, string]
+    varTypeStrs: Table[string, string]
 
 proc toLuaNode*(s: var NimToLuaState, n: NimNode): LuaNode
 proc typeStr(s: var NimToLuaState, n: NimNode): string
@@ -90,13 +91,17 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string =
   of nnkCall: s.procReturnTypeStrs[s.callNameResolvedStr(n)]
   else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
+proc identDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
+  for _ in n.identDefVars:
+    if n.identDefType.kind != nnkEmpty:
+      result.add(s.typeStr(n.identDefType))
+    else:
+      result.add(s.typeStr(n.identDefValue))
+
 proc formalParamsIdentDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
   for identDef in n.formalParamsIdentDefs:
-    for _ in identDef.identDefVars:
-      if identDef.identDefType.kind != nnkEmpty:
-        result.add(s.typeStr(identDef.identDefType))
-      else:
-        result.add(s.typeStr(identDef.identDefValue))
+    for typeStr in s.identDefsTypeStrs(identDef):
+      result.add(typeStr)
 
 proc procDefNameResolvedStr(s: var NimToLuaState, n: NimNode): string =
   result = n.procDefName.strVal
@@ -156,6 +161,15 @@ proc nnkAsgnToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   luaAsgn(s.toLuaNode(n[0]), s.toLuaNode(n[1]))
 
 proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  for variable in n.identDefVars:
+    let typeStr = block:
+      if n.identDefType.kind != nnkEmpty:
+        s.typeStr(n.identDefType)
+      else:
+        s.typeStr(n.identDefValue)
+
+    s.varTypeStrs[variable.strVal] = typeStr
+
   if s.isInFormalParams:
     result = luaFnParams()
     for variable in n.identDefVars:
@@ -166,7 +180,10 @@ proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
     let value = n.identDefValue
 
     for variable in n.identDefVars:
-      result.add(luaAsgn(s.toLuaNode(variable), s.toLuaNode(value)))
+      if value.kind == nnkEmpty:
+        result.add(s.toLuaNode(variable))
+      else:
+        result.add(luaAsgn(s.toLuaNode(variable), s.toLuaNode(value)))
 
 proc nnkFormalParamsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   let wasInFormalParams = s.isInFormalParams
@@ -215,12 +232,16 @@ proc nnkHiddenStdConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.toLuaNode(n[1])
 
 proc nnkConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  case n[0].strVal:
-  # of "int":
-  # of "float":
-  # of "string":
-  of "bool": luaCall(luaIdent("NIM_TO_BOOL"), s.toLuaNode(n[1]))
-  else: s.toLuaNode(n[1])
+  let toType = n[0].strVal
+  case toType:
+  of "int", "float", "string", "bool":
+    let fromType = s.varTypeStrs[n[1].strVal]
+    if fromType == toType:
+      result = s.toLuaNode(n[1])
+    else:
+      result = luaCall(luaIdent(fromType & "_to_" & toType), s.toLuaNode(n[1]))
+  else:
+    result = s.toLuaNode(n[1])
 
 ######################################################################
 

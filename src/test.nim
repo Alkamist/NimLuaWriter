@@ -1,19 +1,15 @@
-# type
-#   Point2d = object
-#     x, y: float
+# block:
+#   let a = 1
 
-# proc xPlusY(s: Point2d): float =
-#   s.x + s.y
+# block:
+#   let a = 1
 
-# let a = Point2d(x: 3.0, y: 2.0)
+proc test(a: int): float =
+  10.0
 
-# discard a.xPlusY
+proc test(a: float): int =
+  10
 
-proc test(a: int): int =
-  proc test(a: bool): bool =
-    a and true
-
-  a + 1
-
-proc test(a: float): float =
-  a + 1.0
+discard test(1)
+discard test(1.0)
+discard test(test(1.0))

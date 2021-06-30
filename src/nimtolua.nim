@@ -1,21 +1,23 @@
 import
   std/macros,
+  std/options,
+  std/tables,
   lua
 
 const
-  DoExprs = {nnkCaseStmt, nnkIfExpr, nnkStmtListExpr, nnkBlockExpr}
+  ScopeOpeners = {nnkBlockStmt, nnkProcDef}
   SupportedNimNodeKinds = {nnkEmpty, nnkSym, nnkIdent, nnkIntLit, nnkFloatLit,
-                           nnkStrLit, nnkStmtList, nnkStmtListExpr,
-                           nnkBlockExpr, nnkIncludeStmt,
+                           nnkStrLit, nnkStmtList, nnkIncludeStmt,
                            nnkLetSection, nnkVarSection,
-                           nnkIfStmt, nnkIfExpr, nnkElifBranch,
-                           nnkElifExpr, nnkElse, nnkElseExpr,
-                           nnkInfix, nnkAsgn, nnkTypeSection,
-                           nnkTypeDef, nnkCaseStmt, nnkProcDef,
-                           nnkReturnStmt, nnkFormalParams, nnkDiscardStmt,
-                           nnkCall, nnkDotExpr}
+                           nnkInfix, nnkAsgn, nnkIdentDefs, nnkFormalParams,
+                           nnkProcDef, nnkBlockStmt, nnkDiscardStmt, nnkCall}
 
-proc toLuaNode*(n: NimNode): LuaNode
+type
+  NimToLuaState = object
+    isInFormalParams: bool
+    procReturnTypeStrs: Table[string, string]
+
+proc toLuaNode*(s: var NimToLuaState, n: NimNode): LuaNode
 
 ######################################################################
 # NimNode Children
@@ -36,382 +38,166 @@ proc objConstrValues(n: NimNode): seq[NimNode] =
 proc formalParamsIdentDefs(n: NimNode): seq[NimNode] =
   n[1..<n.len]
 
+proc formalParamsIdentDefsTypes(n: NimNode): seq[NimNode] =
+  for identDef in n.formalParamsIdentDefs:
+    result.add(identDef.identDefType)
+
 proc formalParamsReturnType(n: NimNode): NimNode =
   n[0]
+
+proc procDefName(n: NimNode): NimNode =
+  n[0]
+
+proc procDefFormalParams(n: NimNode): NimNode =
+  n[3]
+
+proc procDefBody(n: NimNode): NimNode =
+  n[6]
+
+proc procDefResultName(n: NimNode): Option[NimNode] =
+  if n.procDefFormalParams[0].kind != nnkEmpty:
+    return some(n[7])
+
+proc callName(n: NimNode): NimNode =
+  n[0]
+
+proc callValues(n: NimNode): seq[NimNode] =
+  n[1..<n.len]
 
 ######################################################################
 # Helpers
 ######################################################################
 
-proc typeDefaultValue(typeName: string): LuaNode =
-  case typeName:
-  of "int": newLuaIntLitNode(0)
-  of "float": newLuaFloatLitNode(0.0)
-  of "string": newLuaStrLitNode("")
-  of "bool": newLuaIdentNode("false")
-  else: lnkCall.newLuaTree(newLuaIdentNode(typeName))
+proc typeStr(n: NimNode): string =
+  case n.kind:
+  of nnkIntLit: "int"
+  of nnkFloatLit: "float"
+  of nnkStrLit: "string"
+  of nnkIdent:
+    if n.strVal in ["true", "false"]: "bool"
+    else: n.strVal
+  else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
-proc convertToExpression(n: LuaNode, varName: string): LuaNode =
-  var expression = n
+proc callNameStrResolved(s: var NimToLuaState, n: NimNode): string =
+  result = n.callName.strVal
 
-  case expression.kind:
-
-  of lnkStmtList:
-    let lastId = expression.len - 1
-    if lastId >= 0:
-      if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
-        expression[lastId] = expression[lastId].convertToExpression(varName)
-      else:
-        expression[lastId] = lnkInfix.newLuaTree(
-          newLuaIdentNode(lokEquals.toString),
-          newLuaIdentNode(varName),
-          expression[lastId],
-        )
-
-  of lnkIfStmt:
-    for i, branch in expression:
-      let lastId = branch.len - 1
-      if lastId >= 0:
-        if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
-          expression[i][lastId] = branch[lastId].convertToExpression(varName)
-        else:
-          expression[i][lastId] = lnkInfix.newLuaTree(
-            newLuaIdentNode(lokEquals.toString),
-            newLuaIdentNode(varName),
-            branch[lastId],
-          )
-
-  else:
-    expression = lnkInfix.newLuaTree(
-      newLuaIdentNode(lokEquals.toString),
-      newLuaIdentNode(varName),
-      expression,
-    )
-
-  result = lnkDoStmt.newLuaTree(expression)
-
-proc stmtListHasEarlyReturn(n: NimNode): bool =
-  for child in n:
-    case child.kind:
-    of nnkReturnStmt: return true
-    of nnkStmtList: result = child.stmtListHasEarlyReturn
-    else: discard
-
-proc procDefHasEarlyReturn(n: NimNode): bool =
-  let body = n[6]
-  case body.kind:
-  of nnkReturnStmt: true
-  of nnkStmtList: body.stmtListHasEarlyReturn
-  else: false
-
-proc luaDefaultValueInit(variable: LuaNode, defaultValue: LuaNode): LuaNode =
-  result = lnkIfStmt.newLuaTree(
-    lnkElseIfBranch.newLuaTree(
-      lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEqualsEquals.toString),
-        variable,
-        newLuaNilLitNode(),
-      ),
-      lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEquals.toString),
-        variable,
-        defaultValue,
-      ),
-    ),
-  )
-
-proc formalParamsProcDefDefaults(n: NimNode): LuaNode =
-  result = lnkStmtList.newLuaTree()
-
-  for identDef in n.formalParamsIdentDefs:
-    let defaultValue = identDef.identDefValue
-
-    for varName in identDef.identDefVars:
-      case defaultValue.kind:
-      of nnkEmpty:
-        result.add(luaDefaultValueInit(varName.toLuaNode, identDef.identDefType.strVal.typeDefaultValue))
-      else:
-        result.add(luaDefaultValueInit(varName.toLuaNode, defaultValue.toLuaNode))
-
-proc objConstrAssignments(n: NimNode, varName: string): LuaNode =
-  result = lnkStmtList.newLuaTree(
-    lnkInfix.newLuaTree(
-      newLuaIdentNode(lokEquals.toString),
-      newLuaIdentNode(varName),
-      n[0].strVal.typeDefaultValue,
-    ),
-  )
-
-proc objConstExprs(n: NimNode, varName: string): LuaNode =
-  result = lnkStmtList.newLuaTree()
-
-  for value in n.objConstrValues:
-    result.add(
-      lnkDotExpr.newLuaTree(
-        newLuaIdentNode(varName),
-        lnkInfix.newLuaTree(
-          newLuaIdentNode(lokEquals.toString),
-          value[0].toLuaNode,
-          value[1].toLuaNode,
-        ),
-      ),
-    )
-
-proc identDefsAssignments(n: NimNode): LuaNode =
-  result = lnkStmtList.newLuaTree()
-
-  let assignmentValue = n.identDefValue
-
-  for varName in n.identDefVars:
-    case assignmentValue.kind:
-    of DoExprs:
-      result.add(varName.toLuaNode)
-    of nnkEmpty:
-      result.add(lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEquals.toString),
-        varName.toLuaNode,
-        n.identDefType.strVal.typeDefaultValue,
-      ))
-    of nnkObjConstr:
-      result.add(assignmentValue.objConstrAssignments(varName.strVal))
+  for callValue in n.callValues:
+    result.add("_")
+    if callValue.kind == nnkCall:
+      result.add(s.procReturnTypeStrs[s.callNameStrResolved(callValue)])
     else:
-      result.add(lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEquals.toString),
-        varName.toLuaNode,
-        assignmentValue.toLuaNode,
-      ))
-
-proc identDefsExprs(n: NimNode): LuaNode =
-  result = lnkStmtList.newLuaTree()
-
-  let assignmentValue = n.identDefValue
-
-  for varName in n.identDefVars:
-    case assignmentValue.kind:
-    of DoExprs:
-      result.add(assignmentValue.toLuaNode.convertToExpression(varName.strVal))
-    of nnkObjConstr:
-      result.add(assignmentValue.objConstExprs(varName.strVal))
-    else:
-      result.add(lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEquals.toString),
-        varName.toLuaNode,
-        assignmentValue.toLuaNode,
-      ))
+      result.add(callValue.typeStr)
 
 ######################################################################
 # NimNode To LuaNode
 ######################################################################
 
-proc nnkEmptyToLuaNode(n: NimNode): LuaNode =
-  newLuaEmptyNode()
+proc nnkEmptyToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaEmpty()
 
-proc nnkSymToLuaNode(n: NimNode): LuaNode =
-  newLuaIdentNode(n.strVal)
+proc nnkSymToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaIdent(n.strVal)
 
-proc nnkIdentToLuaNode(n: NimNode): LuaNode =
-  newLuaIdentNode(n.strVal)
+proc nnkIdentToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaIdent(n.strVal)
 
-proc nnkIntLitToLuaNode(n: NimNode): LuaNode =
-  newLuaIntLitNode(n.intVal.int)
+proc nnkIntLitToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaIntLit(n.intVal.int)
 
-proc nnkFloatLitToLuaNode(n: NimNode): LuaNode =
-  newLuaFloatLitNode(n.floatVal.float)
+proc nnkFloatLitToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaFloatLit(n.floatVal.float)
 
-proc nnkStrLitToLuaNode(n: NimNode): LuaNode =
-  newLuaStrLitNode(n.strVal)
+proc nnkStrLitToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaStrLit(n.strVal)
 
-proc nnkStmtListToLuaNode(n: NimNode): LuaNode =
-  result = lnkStmtList.newLuaTree()
+proc nnkStmtListToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  result = luaStmtList()
   for child in n:
-    result.add(child.toLuaNode)
+    result.add(s.toLuaNode(child))
 
-proc nnkStmtListExprToLuaNode(n: NimNode): LuaNode =
-  n.nnkStmtListToLuaNode
+proc nnkIncludeStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaEmpty()
 
-proc nnkBlockExprToLuaNode(n: NimNode): LuaNode =
-  n[1].toLuaNode
+proc nnkLetSectionToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  let wasInFormalParams = s.isInFormalParams
+  s.isInFormalParams = false
 
-proc nnkIncludeStmtToLuaNode(n: NimNode): LuaNode =
-  newLuaEmptyNode()
-
-proc nnkLetSectionToLuaNode(n: NimNode): LuaNode =
-  result = lnkStmtList.newLuaTree()
+  result = luaStmtList()
   for identDef in n:
-    result.add(lnkLocal.newLuaTree(identDef.identDefsAssignments))
-    result.add(identDef.identDefsExprs)
+    result.add(luaLocal(s.toLuaNode(identDef)))
 
-proc nnkVarSectionToLuaNode(n: NimNode): LuaNode =
-  n.nnkLetSectionToLuaNode
+  s.isInFormalParams = wasInFormalParams
 
-proc nnkIfStmtToLuaNode(n: NimNode): LuaNode =
-  result = lnkIfStmt.newLuaTree()
+proc nnkVarSectionToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.nnkLetSectionToLuaNode(n)
+
+proc nnkInfixToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  result = luaInfix()
   for child in n:
-    result.add(child.toLuaNode)
+    result.add(s.toLuaNode(child))
 
-proc nnkIfExprToLuaNode(n: NimNode): LuaNode =
-  n.nnkIfStmtToLuaNode
+proc nnkAsgnToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaAsgn(s.toLuaNode(n[0]), s.toLuaNode(n[1]))
 
-proc nnkElifBranchToLuaNode(n: NimNode): LuaNode =
-  result = lnkElseIfBranch.newLuaTree()
-  for child in n:
-    result.add(child.toLuaNode)
+proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  if s.isInFormalParams:
+    result = luaFnParams()
+    for variable in n.identDefVars:
+      result.add(s.toLuaNode(variable))
 
-proc nnkElifExprToLuaNode(n: NimNode): LuaNode =
-  n.nnkElifBranchToLuaNode
-
-proc nnkElseToLuaNode(n: NimNode): LuaNode =
-  lnkElseBranch.newLuaTree(n[0].toLuaNode)
-
-proc nnkElseExprToLuaNode(n: NimNode): LuaNode =
-  n.nnkElseToLuaNode
-
-proc nnkInfixToLuaNode(n: NimNode): LuaNode =
-  result = lnkInfix.newLuaTree()
-  for child in n:
-    result.add(child.toLuaNode)
-
-proc nnkAsgnToLuaNode(n: NimNode): LuaNode =
-  if n[1].kind in DoExprs:
-    result = lnkStmtList.newLuaTree()
-    result.add(n[1].toLuaNode.convertToExpression(n[0].strVal))
   else:
-    result = lnkInfix.newLuaTree(
-      newLuaIdentNode(lokEquals.toString),
-      n[0].toLuaNode,
-      n[1].toLuaNode,
-    )
+    result = luaStmtList()
+    let value = n.identDefValue
 
-proc nnkTypeSectionToLuaNode(n: NimNode): LuaNode =
-  result = lnkStmtList.newLuaTree()
-  for child in n:
-    result.add(child.toLuaNode)
+    for variable in n.identDefVars:
+      result.add(luaAsgn(s.toLuaNode(variable), s.toLuaNode(value)))
 
-proc nnkTypeDefToLuaNode(n: NimNode): LuaNode =
-  let
-    typeName = n[0]
-    objectTy = n[2]
-    recList = objectTy[2]
+proc nnkFormalParamsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  let wasInFormalParams = s.isInFormalParams
+  s.isInFormalParams = true
 
-  var assignments = lnkStmtList.newLuaTree()
+  result = luaFnParams()
+  for identDef in n.formalParamsIdentDefs:
+    result.add(s.toLuaNode(identDef))
 
-  for identDef in recList:
-    let defaultValue = identDef.identDefValue
+  s.isInFormalParams = wasInFormalParams
 
-    for varName in identDef.identDefVars:
-      if defaultValue.kind == nnkEmpty:
-        assignments.add(
-          lnkDotExpr.newLuaTree(
-            newLuaIdentNode("self"),
-            lnkInfix.newLuaTree(
-              newLuaIdentNode(lokEquals.toString),
-              varName.toLuaNode,
-              identDef.identDefType.strVal.typeDefaultValue,
-            ),
-          ),
-        )
+proc nnkProcDefToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  var procDefNameStr = n.procDefName.strVal
 
-      else:
-        assignments.add(lnkInfix.newLuaTree(
-          newLuaIdentNode(lokEquals.toString),
-          varName.toLuaNode,
-          defaultValue.toLuaNode,
-        ))
+  for paramType in n.procDefFormalParams.formalParamsIdentDefsTypes:
+    procDefNameStr.add("_" & paramType.strVal)
 
-  var functionBody = lnkStmtList.newLuaTree(
-    lnkLocal.newLuaTree(
-      lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEquals.toString),
-        newLuaIdentNode("self"),
-        lnkTableDef.newLuaTree(),
-      ),
-    ),
-    assignments,
-    lnkReturnStmt.newLuaTree(
-      newLuaIdentNode("self"),
-    ),
-  )
-
-  result = lnkLocal.newLuaTree(
-    lnkInfix.newLuaTree(
-      newLuaIdentNode(lokEquals.toString),
-      typeName.toLuaNode,
-      lnkFnDef.newLuaTree(
-        lnkFnParams.newLuaTree(),
-        functionBody,
-      ),
-    ),
-  )
-
-proc nnkCaseStmtToLuaNode(n: NimNode): LuaNode =
-  result = lnkIfStmt.newLuaTree()
-  let selector = n[0]
-  for i in 1 .. n.len - 1:
-    if n[i].kind == nnkOfBranch:
-      var branch = n[i].nnkElifBranchToLuaNode
-      branch[0] = lnkInfix.newLuaTree(
-        newLuaIdentNode(lokEqualsEquals.toString),
-        selector.toLuaNode,
-        branch[0],
-      )
-      result.add(branch)
-    else:
-      result.add(n[i].toLuaNode)
-
-proc nnkProcDefToLuaNode(n: NimNode): LuaNode =
-  let
-    functionName = n[0].toLuaNode
-    functionHasResult = n[3][0].kind != nnkEmpty
+  s.procReturnTypeStrs[procDefNameStr] = n.procDefFormalParams.formalParamsReturnType.strVal
 
   var
-    functionParams = n[3].toLuaNode
-    functionBody = lnkStmtList.newLuaTree(n[3].formalParamsProcDefDefaults)
+    functionParams = s.toLuaNode(n.procDefFormalParams)
+    functionBody = luaStmtList()
 
-  if functionHasResult:
-    let resultName = n[7].toLuaNode
-    functionBody.add(lnkLocal.newLuaTree(resultName))
-
-    if n.procDefHasEarlyReturn:
-      functionBody.add(n[6].toLuaNode)
-    else:
-      functionBody.add(lnkDoStmt.newLuaTree(n[6].toLuaNode))
-      functionBody.add(lnkReturnStmt.newLuaTree(resultName))
+  let resultName = n.procDefResultName
+  if resultName.isSome:
+    functionBody.add(luaLocal(s.toLuaNode(resultName.get)))
+    functionBody.add(luaDoStmt(s.toLuaNode(n.procDefBody)))
+    functionBody.add(luaReturnStmt(s.toLuaNode(resultName.get)))
 
   else:
-    functionBody.add(n[6].toLuaNode)
+    functionBody.add(s.toLuaNode(n.procDefBody))
 
-  result = lnkLocal.newLuaTree(
-    lnkInfix.newLuaTree(
-      newLuaIdentNode(lokEquals.toString),
-      functionName,
-      lnkFnDef.newLuaTree(functionParams, functionBody),
-    ),
-  )
+  result = luaLocal(luaAsgn(
+    luaIdent(procDefNameStr),
+    luaFnDef(functionParams, functionBody),
+  ))
 
-proc nnkReturnStmtToLuaNode(n: NimNode): LuaNode =
-  if n[0].kind == nnkAsgn:
-    lnkReturnStmt.newLuaTree(n[0][1].toLuaNode)
-  else:
-    lnkReturnStmt.newLuaTree(n[0].toLuaNode)
+proc nnkBlockStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaDoStmt(s.toLuaNode(n[1]))
 
-proc nnkFormalParamsToLuaNode(n: NimNode): LuaNode =
-  result = lnkFnParams.newLuaTree()
-  for identDef in n.formalParamsIdentDefs:
-    for varName in identDef.identDefVars:
-      result.add(varName.toLuaNode)
+proc nnkDiscardStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.toLuaNode(n[0])
 
-proc nnkDiscardStmtToLuaNode(n: NimNode): LuaNode =
-  n[0].toLuaNode
-
-proc nnkCallToLuaNode(n: NimNode): LuaNode =
-  result = lnkCall.newLuaTree()
-  for child in n:
-    result.add(child.toLuaNode)
-
-proc nnkDotExprToLuaNode(n: NimNode): LuaNode =
-  result = lnkDotExpr.newLuaTree()
-  for child in n:
-    result.add(child.toLuaNode)
+proc nnkCallToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  result = luaCall(luaIdent(s.callNameStrResolved(n)))
+  for callValue in n.callValues:
+    result.add(s.toLuaNode(callValue))
 
 ######################################################################
 
@@ -422,6 +208,11 @@ macro defineToLuaNode(): untyped =
     newEmptyNode(),
     nnkFormalParams.newTree(
       ident("LuaNode"),
+      nnkIdentDefs.newTree(
+        ident("s"),
+        nnkVarTy.newTree(ident("NimToLuaState")),
+        newEmptyNode(),
+      ),
       nnkIdentDefs.newTree(
         ident("n"),
         ident("NimNode"),
@@ -445,9 +236,10 @@ macro defineToLuaNode(): untyped =
       ident($kind),
       nnkCall.newTree(
         nnkDotExpr.newTree(
-          ident("n"),
+          ident("s"),
           ident($kind & "ToLuaNode"),
         ),
+        ident("n"),
       ),
     ))
 
@@ -462,5 +254,6 @@ defineToLuaNode()
 
 macro writeLua*(indentationSpaces: static[int], code: typed): untyped =
   echo code.treeRepr
-  let luaCode = code.toLuaNode.toLua(indentationSpaces)
+  var state = NimToLuaState()
+  let luaCode = state.toLuaNode(code).toLua(indentationSpaces)
   result = newStmtList(newStrLitNode(luaCode))

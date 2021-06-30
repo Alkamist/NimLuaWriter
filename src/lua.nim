@@ -46,36 +46,67 @@ proc toLuaOperatorKind*(text: string): LuaOperatorKind =
 proc newLuaNode*(kind: LuaNodeKind): LuaNode =
   LuaNode(kind: kind)
 
-proc newLuaEmptyNode*(): LuaNode =
+proc luaEmpty*(): LuaNode =
   newLuaNode(lnkEmpty)
 
-proc newLuaNilLitNode*(): LuaNode =
+proc luaNilLit*(): LuaNode =
   newLuaNode(lnkNilLit)
 
-proc newLuaIdentNode*(strVal: string): LuaNode =
+proc luaIdent*(strVal: string): LuaNode =
   result = newLuaNode(lnkIdent)
   result.strVal = strVal
 
-proc newLuaStrLitNode*(strVal: string): LuaNode =
+proc luaStrLit*(strVal: string): LuaNode =
   result = newLuaNode(lnkStrLit)
   result.strVal = strVal
 
-proc newLuaIntLitNode*(intVal: int): LuaNode =
+proc luaIntLit*(intVal: int): LuaNode =
   result = newLuaNode(lnkIntLit)
   result.intVal = intVal
 
-proc newLuaFloatLitNode*(floatVal: float): LuaNode =
+proc luaFloatLit*(floatVal: float): LuaNode =
   result = newLuaNode(lnkFloatLit)
   result.floatVal = floatVal
 
-proc newLuaTree*(kind: LuaNodeKind, childNodes: varargs[LuaNode]): LuaNode =
+proc luaTree*(kind: LuaNodeKind, childNodes: varargs[LuaNode]): LuaNode =
   case kind:
   of lnkNone..lnkNilLit:
-    raise newException(IOError, "Invalid LuaNodeKind for newLuaTree: " & $kind)
+    raise newException(IOError, "Invalid LuaNodeKind for luaTree: " & $kind)
   else:
     result = newLuaNode(kind)
     for child in childNodes:
       result.childNodes.add(child)
+
+proc luaStmtList*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkStmtList.luaTree(childNodes)
+
+proc luaInfix*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkInfix.luaTree(childNodes)
+
+proc luaAsgn*(name, value: LuaNode): LuaNode =
+  luaInfix(
+    luaIdent(lokEquals.toString),
+    name,
+    value,
+  )
+
+proc luaLocal*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkLocal.luaTree(childNodes)
+
+proc luaDoStmt*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkDoStmt.luaTree(childNodes)
+
+proc luaReturnStmt*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkReturnStmt.luaTree(childNodes)
+
+proc luaFnParams*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkFnParams.luaTree(childNodes)
+
+proc luaFnDef*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkFnDef.luaTree(childNodes)
+
+proc luaCall*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkCall.luaTree(childNodes)
 
 proc len*(n: LuaNode): int =
   n.childNodes.len
@@ -157,15 +188,13 @@ proc lnkLocalToLua(n: LuaNode): string =
   "local " & n[0].toLua
 
 proc lnkFnParamsToLua(n: LuaNode): string =
-  result.add("(")
-  for i in 0..<n.len:
+  for i in 0 ..< n.len:
     result.add(n[i].toLua)
     if i < n.len - 1:
       result.add(", ")
-  result.add(")")
 
 proc lnkFnDefToLua(n: LuaNode): string =
-  "function" & n[0].toLua & IndentLevelUp &
+  "function(" & n[0].toLua & ")" & IndentLevelUp &
   n[1].toLua & IndentLevelDown &
   "end"
 

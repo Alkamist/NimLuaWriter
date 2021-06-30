@@ -18,6 +18,28 @@ const
 proc toLuaNode*(n: NimNode): LuaNode
 
 ######################################################################
+# NimNode Children
+######################################################################
+
+proc identDefVars(n: NimNode): seq[NimNode] =
+  n[0..<n.len-2]
+
+proc identDefType(n: NimNode): NimNode =
+  n[n.len-2]
+
+proc identDefValue(n: NimNode): NimNode =
+  n[n.len-1]
+
+proc objConstrValues(n: NimNode): seq[NimNode] =
+  n[1..<n.len]
+
+proc formalParamsIdentDefs(n: NimNode): seq[NimNode] =
+  n[1..<n.len]
+
+proc formalParamsReturnType(n: NimNode): NimNode =
+  n[0]
+
+######################################################################
 # Helpers
 ######################################################################
 
@@ -98,27 +120,6 @@ proc luaDefaultValueInit(variable: LuaNode, defaultValue: LuaNode): LuaNode =
     ),
   )
 
-iterator identDefVars(n: NimNode): NimNode {.inline.} =
-  for i in 0 ..< n.len - 2:
-    yield n[i]
-
-iterator identDefVarsPairs(n: NimNode): (int, NimNode) {.inline.} =
-  for i in 0 ..< n.len - 2:
-    yield (i, n[i])
-
-proc identDefType(n: NimNode): NimNode =
-  n[n.len - 2]
-
-proc identDefValue(n: NimNode): NimNode =
-  n[n.len - 1]
-
-proc formalParamsReturnType(n: NimNode): NimNode =
-  n[0]
-
-iterator formalParamsIdentDefs(n: NimNode): NimNode {.inline.} =
-  for i in 1 ..< n.len:
-    yield n[i]
-
 proc formalParamsProcDefDefaults(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
 
@@ -131,10 +132,6 @@ proc formalParamsProcDefDefaults(n: NimNode): LuaNode =
         result.add(luaDefaultValueInit(varName.toLuaNode, identDef.identDefType.strVal.typeDefaultValue))
       else:
         result.add(luaDefaultValueInit(varName.toLuaNode, defaultValue.toLuaNode))
-
-iterator objConstrValues(n: NimNode): NimNode {.inline.} =
-  for i in 1 ..< n.len:
-    yield n[i]
 
 proc objConstrAssignments(n: NimNode, varName: string): LuaNode =
   result = lnkStmtList.newLuaTree(
@@ -203,7 +200,7 @@ proc identDefsExprs(n: NimNode): LuaNode =
       ))
 
 ######################################################################
-# Nim Nodes
+# NimNode To LuaNode
 ######################################################################
 
 proc nnkEmptyToLuaNode(n: NimNode): LuaNode =
@@ -227,8 +224,7 @@ proc nnkStrLitToLuaNode(n: NimNode): LuaNode =
 proc nnkStmtListToLuaNode(n: NimNode): LuaNode =
   result = lnkStmtList.newLuaTree()
   for child in n:
-    if child.kind != nnkEmpty:
-      result.add(child.toLuaNode)
+    result.add(child.toLuaNode)
 
 proc nnkStmtListExprToLuaNode(n: NimNode): LuaNode =
   n.nnkStmtListToLuaNode

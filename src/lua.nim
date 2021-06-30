@@ -115,7 +115,7 @@ proc lnkNoneToLua(n: LuaNode): string =
   raise newException(IOError, "Tried to convert invalid Lua node to string.")
 
 proc lnkEmptyToLua(n: LuaNode): string =
-  ""
+  "EMPTY"
 
 proc lnkNilLitToLua(n: LuaNode): string =
   "nil"

@@ -5,12 +5,12 @@ import
   lua
 
 const
-  ScopeOpeners = {nnkBlockStmt, nnkProcDef}
   SupportedNimNodeKinds = {nnkEmpty, nnkSym, nnkIdent, nnkIntLit, nnkFloatLit,
                            nnkStrLit, nnkStmtList, nnkIncludeStmt,
                            nnkLetSection, nnkVarSection,
                            nnkInfix, nnkAsgn, nnkIdentDefs, nnkFormalParams,
-                           nnkProcDef, nnkBlockStmt, nnkDiscardStmt, nnkCall}
+                           nnkProcDef, nnkBlockStmt, nnkDiscardStmt, nnkCall,
+                           nnkHiddenStdConv}
 
 type
   NimToLuaState = object
@@ -73,9 +73,12 @@ proc typeStr(n: NimNode): string =
   of nnkIntLit: "int"
   of nnkFloatLit: "float"
   of nnkStrLit: "string"
-  of nnkIdent:
+  of nnkIdent, nnkSym:
     if n.strVal in ["true", "false"]: "bool"
     else: n.strVal
+  of nnkHiddenStdConv:
+    if n[1].kind == nnkIntLit: "float"
+    else: "UNKNOWN_TYPE"
   else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
 proc callNameStrResolved(s: var NimToLuaState, n: NimNode): string =
@@ -198,6 +201,9 @@ proc nnkCallToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   result = luaCall(luaIdent(s.callNameStrResolved(n)))
   for callValue in n.callValues:
     result.add(s.toLuaNode(callValue))
+
+proc nnkHiddenStdConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.toLuaNode(n[1])
 
 ######################################################################
 

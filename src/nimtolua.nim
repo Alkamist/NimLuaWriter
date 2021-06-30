@@ -91,10 +91,11 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string =
 
 proc formalParamsIdentDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
   for identDef in n.formalParamsIdentDefs:
-    if identDef.identDefType.kind != nnkEmpty:
-      result.add(s.typeStr(identDef.identDefType))
-    else:
-      result.add(s.typeStr(identDef.identDefValue))
+    for _ in identDef.identDefVars:
+      if identDef.identDefType.kind != nnkEmpty:
+        result.add(s.typeStr(identDef.identDefType))
+      else:
+        result.add(s.typeStr(identDef.identDefValue))
 
 proc procDefNameResolvedStr(s: var NimToLuaState, n: NimNode): string =
   result = n.procDefName.strVal

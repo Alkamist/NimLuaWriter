@@ -243,12 +243,17 @@ proc nnkHiddenStdConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
 proc nnkConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   let toType = n[0].strVal
   case toType:
-  of "int", "float", "string", "bool":
+  of "int", "float":
     let fromType = s.varTypeStrs[n[1].strVal]
-    if fromType == toType:
-      result = s.toLuaNode(n[1])
-    else:
+
+    if fromType == "int" and toType == "bool" or
+       fromType == "float" and toType == "bool" or
+       fromType == "float" and toType == "int" or
+       fromType == "bool" and toType == "int" or
+       fromType == "bool" and toType == "float":
       result = luaCall(luaIdent(fromType & "_to_" & toType), s.toLuaNode(n[1]))
+    else:
+      result = s.toLuaNode(n[1])
   else:
     result = s.toLuaNode(n[1])
 
@@ -307,6 +312,9 @@ defineToLuaNode()
 
 macro writeLua*(indentationSpaces: static[int], code: typed): untyped =
   echo code.treeRepr
+
   var state = NimToLuaState()
-  let luaCode = state.toLuaNode(code).toLua(indentationSpaces)
+
+  let luaCode = readFile("src/luapreamble.lua") & "\n" & state.toLuaNode(code).toLua(indentationSpaces)
+
   result = newStmtList(newStrLitNode(luaCode))

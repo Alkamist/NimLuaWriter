@@ -249,7 +249,10 @@ proc nnkInfixToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
     result.add(s.toLuaNode(child))
 
 proc nnkAsgnToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  luaAsgn(s.toLuaNode(n[0]), s.toLuaNode(n[1]))
+  if n[1].kind in SpecialExprs:
+    s.specialExprToLuaNode(n[1], n[0].strVal)
+  else:
+    luaAsgn(s.toLuaNode(n[0]), s.toLuaNode(n[1]))
 
 proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.saveIdentDefsVarTypes(n)

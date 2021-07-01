@@ -20,7 +20,16 @@
 # discard a.bool
 
 
-proc test(a = if true: 1 else: 2): bool =
-  a.bool
+# proc test(a = if true: 1 else: 2): bool =
+#   const ayyLmao = 1
+#   ayyLmao.bool
 
-discard test(4)
+# discard test(3)
+
+
+
+proc test(): bool =
+  const ayyLmao = 1
+  1.bool
+
+#discard test(2)

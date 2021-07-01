@@ -13,7 +13,8 @@ const
                            nnkProcDef, nnkBlockStmt, nnkDiscardStmt,
                            nnkHiddenStdConv, nnkCall, nnkConv, nnkIfStmt,
                            nnkElifBranch, nnkElse, nnkCaseStmt, nnkIfExpr,
-                           nnkElifExpr, nnkElseExpr, nnkBlockExpr, nnkStmtListExpr}
+                           nnkElifExpr, nnkElseExpr, nnkBlockExpr, nnkStmtListExpr,
+                           nnkCommand, nnkConstSection}
 
 type
   NimToLuaState = object
@@ -135,7 +136,9 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string =
   of nnkFloatLit: result = "float"
   of nnkStrLit: result = "string"
   of nnkIdent, nnkSym:
-    if n.strVal in ["true", "false"]: result = "bool"
+    case n.strVal:
+    of "true", "false": result = "bool"
+    of "int", "float", "string": result = n.strVal
     else: result = s.varTypeStrs[n.strVal]
   of nnkHiddenStdConv:
     if n[1].kind == nnkIntLit: result ="float"
@@ -289,7 +292,9 @@ proc nnkProcDefToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
       functionParams = s.toLuaNode(n.procDefFormalParams)
       functionBody = luaStmtList()
 
-    functionBody.add(s.formalParamsDefaultValueInit(n.procDefFormalParams))
+    let defaultValueInit = s.formalParamsDefaultValueInit(n.procDefFormalParams)
+    if defaultValueInit.len > 0:
+      functionBody.add(defaultValueInit)
 
     let resultName = n.procDefResultName
     if resultName.isSome:
@@ -327,7 +332,7 @@ proc nnkConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   let toType = n[0].strVal
   case toType:
   of "int", "float", "bool":
-    let fromType = s.varTypeStrs[n[1].strVal]
+    let fromType = s.typeStr(n[1])
 
     if fromType == "int" and toType == "bool" or
        fromType == "float" and toType == "bool" or
@@ -380,6 +385,12 @@ proc nnkCaseStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
         ))
       else:
         result.add(s.toLuaNode(branch))
+
+proc nnkCommandToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.nnkCallToLuaNode(n)
+
+proc nnkConstSectionToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaEmpty()
 
 ######################################################################
 

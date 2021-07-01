@@ -66,6 +66,28 @@ template callValues(n: NimNode): untyped =
 # Helpers
 ######################################################################
 
+proc luaDefaultValueInit(variable: LuaNode, defaultValue: LuaNode): LuaNode =
+  luaIfStmt(
+    luaElseIfBranch(
+      luaInfix(
+        luaIdent(lokEqualsEquals.toString),
+        variable,
+        luaNilLit(),
+      ),
+      luaAsgn(variable, defaultValue),
+    ),
+  )
+
+proc formalParamsDefaultValueInit(s: var NimToLuaState, n: NimNode): LuaNode =
+  result = luaStmtList()
+
+  for identDef in n.formalParamsIdentDefs:
+    let defaultValue = identDef.identDefValue
+
+    if defaultValue.kind != nnkEmpty:
+      for variable in identDef.identDefVars:
+        result.add(luaDefaultValueInit(s.toLuaNode(variable), s.toLuaNode(defaultValue)))
+
 template newScope(code: untyped): untyped =
   var savedVarTypeStrs = s.varTypeStrs
   var savedProcReturnTypeStrs = s.procReturnTypeStrs
@@ -210,6 +232,8 @@ proc nnkProcDefToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
     var
       functionParams = s.toLuaNode(n.procDefFormalParams)
       functionBody = luaStmtList()
+
+    functionBody.add(s.formalParamsDefaultValueInit(n.procDefFormalParams))
 
     let resultName = n.procDefResultName
     if resultName.isSome:

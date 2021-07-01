@@ -6,7 +6,7 @@
 
 let a = 0
 
-proc test(a = true): float =
+proc test(a, b = true): float =
   a.float
 
 discard a.float

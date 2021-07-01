@@ -23,6 +23,7 @@ type
 
 proc toLuaNode*(s: var NimToLuaState, n: NimNode): LuaNode
 proc typeStr(s: var NimToLuaState, n: NimNode): string
+proc convertToExpression(n: LuaNode, varName: string): LuaNode
 
 ######################################################################
 # NimNode Children
@@ -79,16 +80,17 @@ template caseStmtBranches(n: NimNode): untyped =
 ######################################################################
 
 proc luaDefaultValueInit(variable: LuaNode, defaultValue: LuaNode): LuaNode =
-  luaIfStmt(
+  result = luaIfStmt(
     luaElseIfBranch(
       luaInfix(
         luaIdent(lokEqualsEquals.toString),
         variable,
         luaNilLit(),
       ),
-      luaAsgn(variable, defaultValue),
+      defaultValue,
     ),
   )
+  result = result.convertToExpression(variable.strVal)
 
 proc formalParamsDefaultValueInit(s: var NimToLuaState, n: NimNode): LuaNode =
   result = luaStmtList()

@@ -18,3 +18,9 @@
 
 # discard b.bool
 # discard a.bool
+
+
+proc test(a = if true: 1 else: 2): bool =
+  a.bool
+
+discard test(4)

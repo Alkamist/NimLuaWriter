@@ -1,35 +1,5 @@
-# var
-#   a = 5
-#   b = case a:
-#     of 1:
-#       var c = if true: 1.0 else: 2.0
-#       c
-#     else:
-#       3.0
+proc test(a: int): int =
+  a
 
-# discard b.bool
+discard test(if true: 1 else: 2)
 
-
-# let b = 3
-
-# var a = block:
-#   let b = 1.0
-#   b
-
-# discard b.bool
-# discard a.bool
-
-
-# proc test(a = if true: 1 else: 2): bool =
-#   const ayyLmao = 1
-#   ayyLmao.bool
-
-# discard test(3)
-
-
-
-proc test(): bool =
-  const ayyLmao = 1
-  1.bool
-
-#discard test(2)

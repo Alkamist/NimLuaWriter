@@ -196,6 +196,12 @@ proc specialExprToLuaNode(s: var NimToLuaState, n: NimNode, varName: string): Lu
   result = s.toLuaNode(n)
   result = result.convertToExpression(varName)
 
+proc exprAsgn(s: var NimToLuaState, n: NimNode, varName: string): LuaNode =
+  if n.kind in SpecialExprs:
+    s.specialExprToLuaNode(n, varName)
+  else:
+    luaAsgn(luaIdent(varName), s.toLuaNode(n))
+
 ######################################################################
 # NimNode To LuaNode
 ######################################################################
@@ -249,10 +255,7 @@ proc nnkInfixToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
     result.add(s.toLuaNode(child))
 
 proc nnkAsgnToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  if n[1].kind in SpecialExprs:
-    s.specialExprToLuaNode(n[1], n[0].strVal)
-  else:
-    luaAsgn(s.toLuaNode(n[0]), s.toLuaNode(n[1]))
+  s.exprAsgn(n[1], n[0].strVal)
 
 proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.saveIdentDefsVarTypes(n)
@@ -324,9 +327,22 @@ proc nnkDiscardStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.toLuaNode(n[0])
 
 proc nnkCallToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  result = luaCall(luaIdent(s.callNameResolvedStr(n)))
-  for callValue in n.callValues:
-    result.add(s.toLuaNode(callValue))
+  result = luaStmtList()
+
+  let functionNameStr = s.callNameResolvedStr(n)
+  var functionArgNames: seq[string]
+
+  for i, callValue in n.callValues:
+    let argNameStr = functionNameStr & "_arg_" & $i
+    functionArgNames.add(argNameStr)
+    result.add(luaLocal(luaIdent(argNameStr)))
+    result.add(s.exprAsgn(callValue, argNameStr))
+
+  var functionCall = luaCall(luaIdent(functionNameStr))
+  for argName in functionArgNames:
+    functionCall.add(luaIdent(argName))
+
+  result.add(functionCall)
 
 proc nnkHiddenStdConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.toLuaNode(n[1])

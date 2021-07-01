@@ -114,6 +114,9 @@ proc luaIfStmt*(childNodes: varargs[LuaNode]): LuaNode =
 proc luaElseIfBranch*(childNodes: varargs[LuaNode]): LuaNode =
   lnkElseIfBranch.luaTree(childNodes)
 
+proc luaElseBranch*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkElseBranch.luaTree(childNodes)
+
 proc len*(n: LuaNode): int =
   n.childNodes.len
 

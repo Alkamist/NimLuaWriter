@@ -5,12 +5,14 @@ import
   lua
 
 const
+  SpecialExprs = {nnkCaseStmt, nnkIfExpr, nnkBlockExpr, nnkStmtListExpr}
   SupportedNimNodeKinds = {nnkEmpty, nnkSym, nnkIdent, nnkIntLit, nnkFloatLit,
                            nnkStrLit, nnkStmtList, nnkIncludeStmt,
                            nnkLetSection, nnkVarSection,
                            nnkInfix, nnkAsgn, nnkIdentDefs, nnkFormalParams,
                            nnkProcDef, nnkBlockStmt, nnkDiscardStmt,
-                           nnkHiddenStdConv, nnkCall, nnkConv}
+                           nnkHiddenStdConv, nnkCall, nnkConv, nnkIfStmt,
+                           nnkElifBranch, nnkElse, nnkCaseStmt}
 
 type
   NimToLuaState = object
@@ -24,6 +26,9 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string
 ######################################################################
 # NimNode Children
 ######################################################################
+
+template lastNode(n: NimNode): untyped =
+  n[n.len-1]
 
 template identDefVars(n: NimNode): untyped =
   n[0..<n.len-2]
@@ -60,6 +65,12 @@ template callName(n: NimNode): untyped =
   n[0]
 
 template callValues(n: NimNode): untyped =
+  n[1..<n.len]
+
+template caseStmtSelector(n: NimNode): untyped =
+  n[0]
+
+template caseStmtBranches(n: NimNode): untyped =
   n[1..<n.len]
 
 ######################################################################
@@ -118,6 +129,7 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string =
     else: "UNKNOWN_TYPE"
   of nnkConv: n[0].strVal
   of nnkCall: s.procReturnTypeStrs[s.callNameResolvedStr(n)]
+  of nnkIfExpr: s.typeStr(n[0].lastNode)
   else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
 proc identDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
@@ -280,6 +292,34 @@ proc nnkConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
       result = s.toLuaNode(n[1])
   else:
     result = s.toLuaNode(n[1])
+
+proc nnkIfStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  result = luaIfStmt()
+  for child in n:
+    result.add(s.toLuaNode(child))
+
+proc nnkElifBranchToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  result = luaElseIfBranch()
+  for child in n:
+    result.add(s.toLuaNode(child))
+
+proc nnkElseToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  luaElseBranch(s.toLuaNode(n[0]))
+
+proc nnkCaseStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  result = luaIfStmt()
+  for branch in n.caseStmtBranches:
+    if branch.kind == nnkOfBranch:
+      result.add(luaElseIfBranch(
+        luaInfix(
+          luaIdent(lokEqualsEquals.toString),
+          s.toLuaNode(n.caseStmtSelector),
+          s.toLuaNode(branch[0]),
+        ),
+        s.toLuaNode(branch[1]),
+      ))
+    else:
+      result.add(s.toLuaNode(branch))
 
 ######################################################################
 

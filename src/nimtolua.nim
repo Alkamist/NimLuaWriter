@@ -31,13 +31,13 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string
 template lastNode(n: NimNode): untyped =
   n[n.len-1]
 
-template identDefVars(n: NimNode): untyped =
+template identDefsVars(n: NimNode): untyped =
   n[0..<n.len-2]
 
-template identDefType(n: NimNode): untyped =
+template identDefsType(n: NimNode): untyped =
   n[n.len-2]
 
-template identDefValue(n: NimNode): untyped =
+template identDefsValue(n: NimNode): untyped =
   n[n.len-1]
 
 template objConstrValues(n: NimNode): untyped =
@@ -94,10 +94,10 @@ proc formalParamsDefaultValueInit(s: var NimToLuaState, n: NimNode): LuaNode =
   result = luaStmtList()
 
   for identDef in n.formalParamsIdentDefs:
-    let defaultValue = identDef.identDefValue
+    let defaultValue = identDef.identDefsValue
 
     if defaultValue.kind != nnkEmpty:
-      for variable in identDef.identDefVars:
+      for variable in identDef.identDefsVars:
         result.add(luaDefaultValueInit(s.toLuaNode(variable), s.toLuaNode(defaultValue)))
 
 template newScope(code: untyped): untyped =
@@ -117,31 +117,46 @@ proc callNameResolvedStr(s: var NimToLuaState, n: NimNode): string =
     else:
       result.add(s.typeStr(callValue))
 
+proc saveIdentDefsVarTypes(s: var NimToLuaState, n: NimNode) =
+  for variable in n.identDefsVars:
+    let typeStr = block:
+      if n.identDefsType.kind != nnkEmpty:
+        s.typeStr(n.identDefsType)
+      else:
+        s.typeStr(n.identDefsValue)
+
+    s.varTypeStrs[variable.strVal] = typeStr
+
 proc typeStr(s: var NimToLuaState, n: NimNode): string =
   case n.kind:
-  of nnkIntLit: "int"
-  of nnkFloatLit: "float"
-  of nnkStrLit: "string"
+  of nnkIntLit: result = "int"
+  of nnkFloatLit: result = "float"
+  of nnkStrLit: result = "string"
   of nnkIdent, nnkSym:
-    if n.strVal in ["true", "false"]: "bool"
-    else: s.varTypeStrs[n.strVal]
+    if n.strVal in ["true", "false"]: result = "bool"
+    else: result = s.varTypeStrs[n.strVal]
   of nnkHiddenStdConv:
-    if n[1].kind == nnkIntLit: "float"
-    else: "UNKNOWN_TYPE"
-  of nnkConv: n[0].strVal
-  of nnkCall: s.procReturnTypeStrs[s.callNameResolvedStr(n)]
-  of nnkIfExpr: s.typeStr(n[0].lastNode)
-  of nnkCaseStmt: s.typeStr(n.caseStmtBranches[0].lastNode)
-  of nnkBlockExpr: s.typeStr(n[1])
-  of nnkStmtListExpr: s.typeStr(n.lastNode)
+    if n[1].kind == nnkIntLit: result ="float"
+    else: result = "UNKNOWN_TYPE"
+  of nnkConv: result = n[0].strVal
+  of nnkCall: result = s.procReturnTypeStrs[s.callNameResolvedStr(n)]
+  of nnkIfExpr: result = s.typeStr(n[0].lastNode)
+  of nnkCaseStmt: result = s.typeStr(n.caseStmtBranches[0].lastNode)
+  of nnkStmtListExpr, nnkBlockExpr:
+    newScope:
+      for statement in n:
+        if statement.kind in [nnkLetSection, nnkVarSection, nnkConstSection]:
+          for identDef in statement:
+            s.saveIdentDefsVarTypes(identDef)
+      result = s.typeStr(n.lastNode)
   else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
 proc identDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
-  for _ in n.identDefVars:
-    if n.identDefType.kind != nnkEmpty:
-      result.add(s.typeStr(n.identDefType))
+  for _ in n.identDefsVars:
+    if n.identDefsType.kind != nnkEmpty:
+      result.add(s.typeStr(n.identDefsType))
     else:
-      result.add(s.typeStr(n.identDefValue))
+      result.add(s.typeStr(n.identDefsValue))
 
 proc formalParamsIdentDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
   for identDef in n.formalParamsIdentDefs:
@@ -232,27 +247,18 @@ proc nnkAsgnToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   luaAsgn(s.toLuaNode(n[0]), s.toLuaNode(n[1]))
 
 proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  for variable in n.identDefVars:
-    let typeStr = block:
-      if n.identDefType.kind != nnkEmpty:
-        s.typeStr(n.identDefType)
-      else:
-        s.typeStr(n.identDefValue)
-
-    #echo variable.strVal
-
-    s.varTypeStrs[variable.strVal] = typeStr
+  s.saveIdentDefsVarTypes(n)
 
   if s.isInFormalParams:
     result = luaFnParams()
-    for variable in n.identDefVars:
+    for variable in n.identDefsVars:
       result.add(s.toLuaNode(variable))
 
   else:
     result = luaStmtList()
-    let value = n.identDefValue
+    let value = n.identDefsValue
 
-    for variable in n.identDefVars:
+    for variable in n.identDefsVars:
       case value.kind:
       of nnkEmpty:
         result.add(s.toLuaNode(variable))

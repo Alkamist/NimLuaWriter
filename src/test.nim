@@ -1,18 +1,20 @@
-var
-  a = 5
-  b = case a:
-    of 1:
-      var c = if true: 1.0 else: 2.0
-      2.0
-    else:
-      3.0
+# var
+#   a = 5
+#   b = case a:
+#     of 1:
+#       var c = if true: 1.0 else: 2.0
+#       c
+#     else:
+#       3.0
 
-discard b.bool
+# discard b.bool
 
 
-# var b = case 5:
-#   of 1:
-#     var c = if true: 1.0 else: 2.0
-#     2.0
-#   else:
-#     3.0
+# let b = 3
+
+# var a = block:
+#   let b = 1.0
+#   b
+
+# discard b.bool
+# discard a.bool

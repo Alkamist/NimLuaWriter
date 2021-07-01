@@ -1,5 +1,3 @@
-proc test(a: int): int =
-  a
+var a = 10'i16
 
-discard test(if true: 1 else: 2)
-
+discard a.bool

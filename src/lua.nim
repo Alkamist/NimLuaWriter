@@ -1,7 +1,4 @@
-import
-  std/macros,
-  std/tables,
-  std/strutils
+import std/[macros, tables]
 
 type
   LuaNodeKind* = enum
@@ -39,9 +36,6 @@ proc toLua*(n: LuaNode): string
 
 proc toString*(kind: LuaOperatorKind): string =
   $kind
-
-proc toLuaOperatorKind*(text: string): LuaOperatorKind =
-  parseEnum[LuaOperatorKind](text)
 
 proc newLuaNode*(kind: LuaNodeKind): LuaNode =
   LuaNode(kind: kind)

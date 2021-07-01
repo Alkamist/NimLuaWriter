@@ -12,7 +12,8 @@ const
                            nnkInfix, nnkAsgn, nnkIdentDefs, nnkFormalParams,
                            nnkProcDef, nnkBlockStmt, nnkDiscardStmt,
                            nnkHiddenStdConv, nnkCall, nnkConv, nnkIfStmt,
-                           nnkElifBranch, nnkElse, nnkCaseStmt}
+                           nnkElifBranch, nnkElse, nnkCaseStmt, nnkIfExpr,
+                           nnkElifExpr, nnkElseExpr, nnkBlockExpr, nnkStmtListExpr}
 
 type
   NimToLuaState = object
@@ -130,6 +131,9 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string =
   of nnkConv: n[0].strVal
   of nnkCall: s.procReturnTypeStrs[s.callNameResolvedStr(n)]
   of nnkIfExpr: s.typeStr(n[0].lastNode)
+  of nnkCaseStmt: s.typeStr(n.caseStmtBranches[0].lastNode)
+  of nnkBlockExpr: s.typeStr(n[1])
+  of nnkStmtListExpr: s.typeStr(n.lastNode)
   else: raise newException(IOError, "Tried to get type string of non type: " & $n.kind)
 
 proc identDefsTypeStrs(s: var NimToLuaState, n: NimNode): seq[string] =
@@ -149,6 +153,36 @@ proc procDefNameResolvedStr(s: var NimToLuaState, n: NimNode): string =
 
   for typeStr in s.formalParamsIdentDefsTypeStrs(n.procDefFormalParams):
     result.add("_" & typeStr)
+
+proc convertToExpression(n: LuaNode, varName: string): LuaNode =
+  var expression = n
+
+  case expression.kind:
+  of lnkStmtList:
+    let lastId = expression.len - 1
+    if lastId >= 0:
+      if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
+        expression[lastId] = expression[lastId].convertToExpression(varName)
+      else:
+        expression[lastId] = luaAsgn(luaIdent(varName), expression[lastId])
+  of lnkIfStmt:
+    for i, branch in expression:
+      let lastId = branch.len - 1
+      if lastId >= 0:
+        if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
+          expression[i][lastId] = branch[lastId].convertToExpression(varName)
+        else:
+          expression[i][lastId] = luaAsgn(luaIdent(varName), branch[lastId])
+  of lnkDoStmt:
+    expression = luaDoStmt(expression[0].convertToExpression(varName))
+  else:
+    expression = luaAsgn(luaIdent(varName), n)
+
+  result = expression
+
+proc specialExprToLuaNode(s: var NimToLuaState, n: NimNode, varName: string): LuaNode =
+  result = s.toLuaNode(n)
+  result = result.convertToExpression(varName)
 
 ######################################################################
 # NimNode To LuaNode
@@ -176,6 +210,10 @@ proc nnkStmtListToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   result = luaStmtList()
   for child in n:
     result.add(s.toLuaNode(child))
+
+proc nnkStmtListExprToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  newScope:
+    result = luaDoStmt(s.nnkStmtListToLuaNode(n))
 
 proc nnkIncludeStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   luaEmpty()
@@ -221,8 +259,12 @@ proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
     let value = n.identDefValue
 
     for variable in n.identDefVars:
-      if value.kind == nnkEmpty:
+      case value.kind:
+      of nnkEmpty:
         result.add(s.toLuaNode(variable))
+      of SpecialExprs:
+        result.add(s.toLuaNode(variable))
+        result.add(s.specialExprToLuaNode(value, variable.strVal))
       else:
         result.add(luaAsgn(s.toLuaNode(variable), s.toLuaNode(value)))
 
@@ -265,6 +307,9 @@ proc nnkBlockStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   newScope:
     result = luaDoStmt(s.toLuaNode(n[1]))
 
+proc nnkBlockExprToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.nnkBlockStmtToLuaNode(n)
+
 proc nnkDiscardStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   s.toLuaNode(n[0])
 
@@ -298,28 +343,41 @@ proc nnkIfStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   for child in n:
     result.add(s.toLuaNode(child))
 
+proc nnkIfExprToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.nnkIfStmtToLuaNode(n)
+
 proc nnkElifBranchToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   result = luaElseIfBranch()
-  for child in n:
-    result.add(s.toLuaNode(child))
+  newScope:
+    for child in n:
+      result.add(s.toLuaNode(child))
+
+proc nnkElifExprToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.nnkElifBranchToLuaNode(n)
 
 proc nnkElseToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
-  luaElseBranch(s.toLuaNode(n[0]))
+  result = luaElseBranch()
+  newScope:
+    result.add(s.toLuaNode(n[0]))
+
+proc nnkElseExprToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
+  s.nnkElseToLuaNode(n)
 
 proc nnkCaseStmtToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   result = luaIfStmt()
   for branch in n.caseStmtBranches:
-    if branch.kind == nnkOfBranch:
-      result.add(luaElseIfBranch(
-        luaInfix(
-          luaIdent(lokEqualsEquals.toString),
-          s.toLuaNode(n.caseStmtSelector),
-          s.toLuaNode(branch[0]),
-        ),
-        s.toLuaNode(branch[1]),
-      ))
-    else:
-      result.add(s.toLuaNode(branch))
+    newScope:
+      if branch.kind == nnkOfBranch:
+        result.add(luaElseIfBranch(
+          luaInfix(
+            luaIdent(lokEqualsEquals.toString),
+            s.toLuaNode(n.caseStmtSelector),
+            s.toLuaNode(branch[0]),
+          ),
+          s.toLuaNode(branch[1]),
+        ))
+      else:
+        result.add(s.toLuaNode(branch))
 
 ######################################################################
 

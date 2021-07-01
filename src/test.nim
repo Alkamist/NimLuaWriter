@@ -12,10 +12,10 @@
 #   a.float
 let
   a = 1.0
-  b = block:
-    a
+  b = true
+  c = if b: a else: 2.0
 
-discard b.bool
+discard c.bool
 
 
 

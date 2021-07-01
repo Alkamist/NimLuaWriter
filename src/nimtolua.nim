@@ -124,7 +124,7 @@ proc typeStr(s: var NimToLuaState, n: NimNode): string =
   of nnkStrLit: "string"
   of nnkIdent, nnkSym:
     if n.strVal in ["true", "false"]: "bool"
-    else: n.strVal
+    else: s.varTypeStrs[n.strVal]
   of nnkHiddenStdConv:
     if n[1].kind == nnkIntLit: "float"
     else: "UNKNOWN_TYPE"
@@ -324,7 +324,7 @@ proc nnkHiddenStdConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
 proc nnkConvToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
   let toType = n[0].strVal
   case toType:
-  of "int", "float":
+  of "int", "float", "bool":
     let fromType = s.varTypeStrs[n[1].strVal]
 
     if fromType == "int" and toType == "bool" or

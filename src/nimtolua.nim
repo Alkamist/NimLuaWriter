@@ -158,21 +158,13 @@ proc convertToExpression(n: LuaNode, varName: string): LuaNode =
   var expression = n
 
   case expression.kind:
-  of lnkStmtList:
+  of lnkStmtList, lnkElseIfBranch, lnkElseBranch:
     let lastId = expression.len - 1
     if lastId >= 0:
-      if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
-        expression[lastId] = expression[lastId].convertToExpression(varName)
-      else:
-        expression[lastId] = luaAsgn(luaIdent(varName), expression[lastId])
+      expression[lastId] = expression[lastId].convertToExpression(varName)
   of lnkIfStmt:
     for i, branch in expression:
-      let lastId = branch.len - 1
-      if lastId >= 0:
-        if expression[lastId].kind in [lnkStmtList, lnkIfStmt]:
-          expression[i][lastId] = branch[lastId].convertToExpression(varName)
-        else:
-          expression[i][lastId] = luaAsgn(luaIdent(varName), branch[lastId])
+      expression[i] = branch.convertToExpression(varName)
   of lnkDoStmt:
     expression = luaDoStmt(expression[0].convertToExpression(varName))
   else:
@@ -246,6 +238,8 @@ proc nnkIdentDefsToLuaNode(s: var NimToLuaState, n: NimNode): LuaNode =
         s.typeStr(n.identDefType)
       else:
         s.typeStr(n.identDefValue)
+
+    #echo variable.strVal
 
     s.varTypeStrs[variable.strVal] = typeStr
 

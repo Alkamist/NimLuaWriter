@@ -1,3 +1,7 @@
+#let a = 1
+
+
+
 # let a = case 5:
 #   of 1: 1
 #   of 2: 2

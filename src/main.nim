@@ -1,7 +1,6 @@
-import std/macros, makeluafriendly
+import nimtolua
 
-expandMacros:
-  makeLuaFriendly:
-    let a = 1
+let luaCode = writeLua(2):
+  include test
 
-    discard a.bool
+echo luaCode

@@ -23,15 +23,15 @@
 # discard a.bool
 
 
-type
-  Point2d = object
-    x, y: float
+# type
+#   Point2d = object
+#     x, y: float
 
-  Point3d = object
-    p2d: Point2d
-    z: float
+#   Point3d = object
+#     p2d: Point2d
+#     z: float
 
-let a = Point3d(z: 3.0)
+# let a = Point3d(z: 3.0)
 
 # discard a.x + 1
 # discard a.x + a.y

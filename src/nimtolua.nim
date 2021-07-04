@@ -17,7 +17,7 @@ proc unpackValues[K, V](t: Table[K, V], keySet: set[K]): seq[V] =
     result.add(t[key])
 
 const
-  SpecialExprs = {nkCaseStmt, nkIfExpr, nkBlockExpr, nkStmtListExpr}
+  SpecialExprs = {nkCaseStmt, nkIfExpr, nkBlockExpr, nkStmtListExpr, nkObjConstr}
   NimLiteralsToStrs = {
     nkCharLit: "char",
     nkIntLit: "int", nkInt8Lit: "int8", nkInt16Lit: "int16",
@@ -37,6 +37,16 @@ const
   BoolTypeStr = "bool"
   # BoolValues = ["true", "false"]
 
+type
+  NimProgramState = object
+    tempVarCount: int
+
+var s: NimProgramState
+
+proc genTempVarName(s: var NimProgramState): string =
+  result = "TEMP_" & $s.tempVarCount
+  s.tempVarCount += 1
+
 converter toLuaNode(n: PNode): LuaNode
 
 ####################################################################
@@ -49,11 +59,6 @@ proc luaDefaultValue(n: PNode): LuaNode =
   of tyString, tyCString: luaStrLit("")
   of tyObject: luaCall(luaIdent($n.typ & "_init"))
   else: raise newException(IOError, "Unsupported type kind for default value: " & $n.typ.kind)
-
-var tempVarCount = 0
-proc genTempVarName(): string =
-  result = "TEMP_" & $tempVarCount
-  tempVarCount += 1
 
 proc containsSpecialExpr(n: PNode): bool =
   if n.kind in SpecialExprs:
@@ -99,12 +104,26 @@ proc specialExprResolution(n: PNode, varSym: PNode): (LuaNode, LuaNode) =
 
     result = (exprResolutions, exprAssignments)
   else:
-    let exprSym = luaIdent(genTempVarName())
+    let exprSym = luaIdent(s.genTempVarName())
 
-    var exprResolutions = luaStmtList(
-      luaLocal(exprSym),
-      n.convertToExpression(exprSym.strVal),
-    )
+    var exprResolutions =
+      if n.kind == nkObjConstr:
+        var output = luaStmtList(
+          luaLocal(luaAsgn(
+            exprSym,
+            luaCall(luaIdent($n.typ & "_init")),
+          )),
+        )
+
+        for field in n[1 ..^ 1]:
+          output.add luaAsgn(luaDotExpr(exprSym, field[0]), field[1])
+
+        output
+      else:
+        luaStmtList(
+          luaLocal(exprSym),
+          n.convertToExpression(exprSym.strVal),
+        )
 
     result = (exprResolutions, exprSym)
 
@@ -184,11 +203,6 @@ proc nkTypeDefToLuaNode(n: PNode): LuaNode =
     ),
   ))
 
-proc nkObjConstrToLuaNode(n: PNode): LuaNode =
-  result = luaStmtList(luaCall(luaIdent($n.typ & "_init")))
-  for field in n[1 ..^ 1]:
-    result.add luaAsgn(field[0], field[1])
-
 template unpackTo(luaTreeFn: untyped): untyped =
   result = luaTreeFn()
   for child in n:
@@ -219,7 +233,6 @@ converter toLuaNode(n: PNode): LuaNode =
   of nkElse, nkElseExpr: n.nkElseToLuaNode()
   of nkConv: n.nkConvToLuaNode()
   of nkTypeDef: n.nkTypeDefToLuaNode()
-  of nkObjConstr: n.nkObjConstrToLuaNode()
   else: raise newException(IOError, "Unsupported PNode kind: " & $n.kind)
 
 proc writeLua*(nimCode: string, indentationSpaces: int): string =

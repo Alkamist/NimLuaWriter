@@ -1,6 +1,6 @@
 import
-  compiler/[types],
-  std/[tables, sequtils],
+  compiler/types,
+  std/tables,
   hnimast/[compiler_aux, hast_common],
   lua
 
@@ -56,7 +56,7 @@ proc luaDefaultValue(n: PNode): LuaNode =
   of tyFloat..tyFloat128: luaFloatLit(0.0)
   of tyInt..tyInt64: luaIntLit(0)
   of tyUInt..tyUInt64: luaIntLit(0)
-  of tyString, tyCString: luaStrLit("")
+  of tyEnum, tyString, tyCString: luaStrLit("")
   of tyObject: luaCall(luaIdent($n.typ & "_init"))
   else: raise newException(IOError, "Unsupported type kind for default value: " & $n.typ.kind)
 
@@ -136,6 +136,12 @@ proc toLuaOperator(n: PNode): LuaNode =
     else: $n
   )
 
+proc nkSymToLuaNode(n: PNode): LuaNode =
+  if n.sym.kind == skEnumField:
+    luaStrLit($n)
+  else:
+    luaIdent($n)
+
 proc nkLetOrVarSectionToLuaNode(n: PNode, sectionKind: TNodeKind): LuaNode =
   result = luaStmtList()
   for identDefs in n:
@@ -184,24 +190,28 @@ proc nkConvToLuaNode(n: PNode): LuaNode =
     result = n[1]
 
 proc nkTypeDefToLuaNode(n: PNode): LuaNode =
-  var fnBody = luaStmtList(luaLocal(luaAsgn(luaIdent("self"), luaTableDef())))
+  case n[2].typ.kind:
+  of tyEnum: result = luaEmpty()
+  of tyObject:
+    var fnBody = luaStmtList(luaLocal(luaAsgn(luaIdent("self"), luaTableDef())))
 
-  for identDefs in n[2][2]:
-    for varSym in identDefs[0 ..^ 3]:
-      fnBody.add luaAsgn(
-        luaDotExpr(luaIdent("self"), varSym),
-        identDefs[^2].luaDefaultValue(),
-      )
+    for identDefs in n[2][2]:
+      for varSym in identDefs[0 ..^ 3]:
+        fnBody.add luaAsgn(
+          luaDotExpr(luaIdent("self"), varSym),
+          identDefs[^2].luaDefaultValue(),
+        )
 
-  fnBody.add luaReturnStmt(luaIdent("self"))
+    fnBody.add luaReturnStmt(luaIdent("self"))
 
-  result = luaLocal(luaAsgn(
-    luaIdent($n[0] & "_init"),
-    luaFnDef(
-      luaFnParams(),
-      fnBody,
-    ),
-  ))
+    result = luaLocal(luaAsgn(
+      luaIdent($n[0] & "_init"),
+      luaFnDef(
+        luaFnParams(),
+        fnBody,
+      ),
+    ))
+  else: raise newException(IOError, "Unsupported type kind for type def: " & $n[0].typ.kind)
 
 template unpackTo(luaTreeFn: untyped): untyped =
   result = luaTreeFn()
@@ -217,13 +227,14 @@ proc nkTypeSectionToLuaNode(n: PNode): LuaNode = unpackTo(luaStmtList)
 converter toLuaNode(n: PNode): LuaNode =
   case n.kind
   of nkEmpty, nkIncludeStmt, nkConstSection: luaEmpty()
-  of nkIdent, nkSym: luaIdent($n)
+  of nkIdent: luaIdent($n)
   of nkCharLit..nkUInt64Lit: luaIntLit(n.intVal.int)
   of nkFloatLit..nkFloat64Lit: luaFloatLit(n.floatVal.float)
   of nkStrLit..nkTripleStrLit: luaStrLit(n.strVal)
   of nkDiscardStmt: n[0]
   of nkAsgn: luaAsgn(n[0], n[1])
   of nkInfix: luaInfix(n[0], n[1], n[2])
+  of nkSym: n.nkSymToLuaNode()
   of nkTypeSection: n.nkTypeSectionToLuaNode()
   of nkStmtList: n.nkStmtListToLuaNode()
   of nkLetSection, nkVarSection: n.nkLetOrVarSectionToLuaNode(n.kind)

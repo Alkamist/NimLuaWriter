@@ -35,3 +35,18 @@
 
 # discard a.x + 1
 # discard a.x + a.y
+
+
+type
+  Point2d = object
+    x, y: float
+
+  TestEnum = enum
+    teField0,
+    teField1,
+
+let a = teField0
+
+let b = if a == teField1: 1 else: 2
+
+let point = Point2d(y: 3.0)

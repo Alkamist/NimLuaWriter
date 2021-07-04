@@ -149,7 +149,7 @@ proc toLuaOperator(n: PNode): LuaNode =
   )
 
 proc nkSymToLuaNode(n: PNode): LuaNode =
-  if n.sym.kind == skEnumField:
+  if n.sym.kind == skEnumField and n.typ.kind != tyBool:
     luaStrLit($n)
   else:
     luaIdent($n)

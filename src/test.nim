@@ -12,7 +12,7 @@
 
 # echo a + b
 
-proc echo(message: string) {.importcpp: "reaper.ShowConsoleMsg(# .. \"\n\")".}
+#proc echo(message: string) {.importcpp: "reaper.ShowConsoleMsg(# .. \"\n\")".}
 # proc test(arg1, arg2, arg3, arg4: int) {.importcpp: "importTest(@)".}
 
-echo $5
+#echo $5

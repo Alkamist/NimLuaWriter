@@ -70,6 +70,9 @@ proc luaStmtList*(childNodes: varargs[LuaNode]): LuaNode =
 proc luaInfix*(childNodes: varargs[LuaNode]): LuaNode =
   lnkInfix.luaTree(childNodes)
 
+proc luaPrefix*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkPrefix.luaTree(childNodes)
+
 proc luaAsgn*(name, value: LuaNode): LuaNode =
   luaInfix(
     luaIdent(lokEquals.toString),
@@ -168,7 +171,7 @@ proc toLuaStr(n: LuaNode): string =
   of lnkStrLit: result = "\"" & n.strVal & "\""
   of lnkIdent: result = n.strVal
   of lnkInfix: result = n[1].toLuaStr & " " & n[0].toLuaStr & " " & n[2].toLuaStr
-  of lnkPrefix: result = n[0].toLuaStr & n[1].toLuaStr
+  of lnkPrefix: result = n[0].toLuaStr & " " & n[1].toLuaStr
   of lnkLocal: result = "local " & n[0].toLuaStr
   of lnkDotExpr: result = n[0].toLuaStr & "." & n[1].toLuaStr
   of lnkReturnStmt: result = "return " & n[0].toLuaStr

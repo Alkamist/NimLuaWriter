@@ -144,6 +144,11 @@ proc processNativeFnStr(n: PNode, nativeStr: string): string =
 proc toLuaOperator(n: PNode): LuaNode =
   luaIdent(
     case $n:
+    of "+=": "+"
+    of "-=": "-"
+    of "*=": "*"
+    of "/=": "/"
+    of "%=": "%"
     of "!=": lokNotEquals.toString
     else: $n
   )
@@ -163,6 +168,21 @@ proc nkAsgnToLuaNode(n: PNode): LuaNode =
     )
   else:
     result = luaAsgn(n[0], n[1])
+
+proc nkInfixToLuaNode(n: PNode): LuaNode =
+  let operator = n[0].toLuaOperator()
+
+  if $n[0] in ["+=", "-=", "*=", "/=", "%="]:
+    if n[2].containsSpecialExpr():
+      let (exprResolutions, exprAssignments) = n[2].specialExprResolution($n[1])
+      result = luaStmtList(
+        exprResolutions,
+        luaAsgn(n[1], luaInfix(operator, n[1], exprAssignments)),
+      )
+    else:
+      result = luaAsgn(n[1], luaInfix(operator, n[1], n[2]))
+  else:
+    result = luaInfix(operator, n[1], n[2])
 
 proc nkLetOrVarSectionToLuaNode(n: PNode, sectionKind: TNodeKind): LuaNode =
   result = luaStmtList()
@@ -346,7 +366,8 @@ converter toLuaNode(n: PNode): LuaNode =
   of nkStrLit..nkTripleStrLit: luaStrLit(n.strVal)
   of nkDiscardStmt, nkHiddenDeref, nkHiddenAddr: n[0]
   of nkAsgn: n.nkAsgnToLuaNode()
-  of nkInfix: luaInfix(n[0], n[1], n[2])
+  of nkInfix: n.nkInfixToLuaNode()
+  of nkPrefix: luaPrefix(n[0].toLuaOperator(), n[1])
   of nkDotExpr: luaDotExpr(n[0], n[1])
   of nkSym: n.nkSymToLuaNode()
   of nkTypeSection: n.nkTypeSectionToLuaNode()

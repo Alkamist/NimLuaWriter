@@ -1,41 +1,10 @@
 import
   compiler/types,
-  std/tables,
   hnimast/[compiler_aux, hast_common],
   lua
 
-proc unpackKeys[K, V](t: Table[K, V]): seq[K] =
-  for key in t.keys:
-    result.add(key)
-
-proc unpackValues[K, V](t: Table[K, V]): seq[V] =
-  for value in t.values:
-    result.add(value)
-
-proc unpackValues[K, V](t: Table[K, V], keySet: set[K]): seq[V] =
-  for key in keySet:
-    result.add(t[key])
-
 const
   SpecialExprs = {nkCaseStmt, nkIfExpr, nkBlockExpr, nkStmtListExpr, nkObjConstr}
-  NimLiteralsToStrs = {
-    nkCharLit: "char",
-    nkIntLit: "int", nkInt8Lit: "int8", nkInt16Lit: "int16",
-    nkInt32Lit: "int32", nkInt64Lit: "int64",
-    nkUIntLit: "uint", nkUInt8Lit: "uint8", nkUInt16Lit: "uint16",
-    nkUInt32Lit: "uint32", nkUInt64Lit: "uint64",
-    nkFloatLit: "float", nkFloat32Lit: "float32",
-    nkFloat64Lit: "float64", nkFloat128Lit: "float128",
-    nkStrLit: "string", nkRStrLit: "string", nkTripleStrLit: "string",
-    nkNilLit: "nil",
-  }.toTable
-  # NimLiteralKinds = NimLiteralsToStrs.unpackKeys
-  # NimTypeStrs = NimLiteralsToStrs.unpackValues.deduplicate
-  IntTypeStrs = NimLiteralsToStrs.unpackValues({nkIntLit..nkInt64Lit})
-  UIntTypeStrs = NimLiteralsToStrs.unpackValues({nkUIntLit..nkUInt64Lit})
-  FloatTypeStrs = NimLiteralsToStrs.unpackValues({nkFloatLit..nkFloat128Lit})
-  BoolTypeStr = "bool"
-  # BoolValues = ["true", "false"]
 
 type
   NimProgramState = object
@@ -43,8 +12,8 @@ type
 
 var s: NimProgramState
 
-proc genTempVarName(s: var NimProgramState): string =
-  result = "TEMP_" & $s.tempVarCount
+proc genTempVarName(s: var NimProgramState, varName: string): string =
+  result = varName & "_temp_" & $s.tempVarCount
   s.tempVarCount += 1
 
 converter toLuaNode(n: PNode): LuaNode
@@ -116,7 +85,7 @@ proc specialExprResolution(n: PNode, varSym: PNode): (LuaNode, LuaNode) =
 
     result = (exprResolutions, exprAssignments)
   else:
-    let exprSym = luaIdent(s.genTempVarName())
+    let exprSym = luaIdent(s.genTempVarName($varSym))
 
     var exprResolutions =
       if n.kind == nkObjConstr:
@@ -192,20 +161,25 @@ proc nkCaseStmtToLuaNode(n: PNode): LuaNode =
       result.add branch
 
 proc nkConvToLuaNode(n: PNode): LuaNode =
-  let toType = $n[0]
+  const
+    tyIntTypes = {tyChar, tyInt..tyInt64}
+    tyUIntTypes = {tyUInt..tyUInt64}
+    tyFloatTypes = {tyFloat..tyFloat128}
 
-  case toType:
-  of IntTypeStrs, UIntTypeStrs, FloatTypeStrs, BoolTypeStr:
-    let fromType = $n[1].typ
+  let toTypeKind = n[0].typ.kind
 
-    if fromType in IntTypeStrs and toType == BoolTypeStr or
-       fromType in UIntTypeStrs and toType == BoolTypeStr or
-       fromType in FloatTypeStrs and toType == BoolTypeStr or
-       fromType in FloatTypeStrs and toType in IntTypeStrs or
-       fromType == BoolTypeStr and toType in IntTypeStrs or
-       fromType == BoolTypeStr and toType in UIntTypeStrs or
-       fromType == BoolTypeStr and toType in FloatTypeStrs:
-      result = luaCall(luaIdent(fromType & "_to_" & toType), n[1])
+  case toTypeKind:
+  of tyIntTypes, tyUIntTypes, tyFloatTypes, tyBool:
+    let fromTypeKind = n[1].typ.kind
+
+    if fromTypeKind in tyIntTypes and toTypeKind == tyBool or
+       fromTypeKind in tyUIntTypes and toTypeKind == tyBool or
+       fromTypeKind in tyFloatTypes and toTypeKind == tyBool or
+       fromTypeKind in tyFloatTypes and toTypeKind in tyIntTypes or
+       fromTypeKind == tyBool and toTypeKind in tyIntTypes or
+       fromTypeKind == tyBool and toTypeKind in tyUIntTypes or
+       fromTypeKind == tyBool and toTypeKind in tyFloatTypes:
+      result = luaCall(luaIdent(fromTypeKind.toHumanStr() & "_to_" & toTypeKind.toHumanStr()), n[1])
     else:
       result = n[1]
   else:

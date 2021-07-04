@@ -36,11 +36,14 @@
 # let b = if a == teField1: 1 else: 2
 
 # let point = Point2d(y: 3.0)
+# let arg = 7
+# proc test*(a = if true: 1 else: arg): int =
+#   var b = 2
+#   var c = 3
+#   if b == 1:
+#     a
+#   else:
+#     c
 
-proc test*(a = if true: 1 else: 0): int =
-  var b = 2
-  var c = 3
-  if b == 1:
-    a
-  else:
-    c
+let a = 1
+discard a.bool

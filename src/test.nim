@@ -17,10 +17,10 @@ discard pointLet.translate(Point2d(x: 1.0, y: 2.0))
 discard pointVar.translate(Point2d(x: 1.0, y: 2.0))
 
 
-# proc test(a = 1): int =
+# proc test(a: int): int =
 #   a + 2
 
-# discard test(if true: 5 else: 1)
+# discard test(1)
 
 
 # let a = if true: 5 else: 1

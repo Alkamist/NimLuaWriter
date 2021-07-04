@@ -37,8 +37,7 @@
 
 # let point = Point2d(y: 3.0)
 
-
-proc test(a: int): int =
+proc test*(a = if true: 1 else: 0): int =
   var b = 2
   var c = 3
   if b == 1:

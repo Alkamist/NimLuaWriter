@@ -60,6 +60,18 @@ proc luaDefaultValue(n: PNode): LuaNode =
   of tyObject: luaCall(luaIdent($n.typ & "_init"))
   else: raise newException(IOError, "Unsupported type kind for default value: " & $n.typ.kind)
 
+proc luaDefaultValueInit(variable: LuaNode, defaultValue: LuaNode): LuaNode =
+  luaIfStmt(
+    luaElseIfBranch(
+      luaInfix(
+        luaIdent(lokEqualsEquals.toString),
+        variable,
+        luaNilLit(),
+      ),
+      luaAsgn(variable, defaultValue),
+    ),
+  )
+
 proc containsSpecialExpr(n: PNode): bool =
   if n.kind in SpecialExprs:
     return true
@@ -227,26 +239,41 @@ proc nkProcDefToLuaNode(n: PNode): LuaNode =
   var
     fnNameStr = $n[0]
     fnParams = luaFnParams()
+    fnParamsExprResolutions = luaStmtList()
+    fnParamsDefaultValueInits = luaStmtList()
+
   for identDefs in n[3][1 ..^ 1]:
+    let value = identDefs[^1]
     for varSym in identDefs[0 ..^ 3]:
       fnNameStr.add "_" & $varSym.typ
       fnParams.add varSym
 
-  var fnBody =
-    if n[6].kind == nkAsgn:
-      luaStmtList(
-        luaLocal(n[6][0]),
-        n[6],
-        luaReturnStmt(n[6][0]),
-      )
-    else:
-      n[6]
+      if value.containsSpecialExpr():
+        let (exprResolutions, exprAssignments) = value.specialExprResolution(varSym)
+        fnParamsExprResolutions.add exprResolutions
+        fnParamsDefaultValueInits.add varSym.luaDefaultValueInit(exprAssignments)
+      else:
+        if value.kind == nkEmpty:
+          fnParamsDefaultValueInits.add varSym
+        else:
+          fnParamsDefaultValueInits.add luaAsgn(varSym, value)
 
-  result = luaLocal(luaAsgn(
-    luaIdent(fnNameStr),
-    luaFnDef(
-      fnParams,
-      fnBody,
+  var fnBody = luaStmtList(fnParamsDefaultValueInits)
+  if n[6].kind == nkAsgn:
+    fnBody.add luaLocal(n[6][0])
+    fnBody.add n[6]
+    fnBody.add luaReturnStmt(n[6][0])
+  else:
+    fnBody.add n[6]
+
+  result = luaStmtList(
+    fnParamsExprResolutions,
+    luaLocal(luaAsgn(
+      luaIdent(fnNameStr),
+      luaFnDef(
+        fnParams,
+        fnBody,
+      ),
     ),
   ))
 

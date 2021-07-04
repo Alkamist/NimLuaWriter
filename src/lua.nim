@@ -109,6 +109,12 @@ proc luaElseIfBranch*(childNodes: varargs[LuaNode]): LuaNode =
 proc luaElseBranch*(childNodes: varargs[LuaNode]): LuaNode =
   lnkElseBranch.luaTree(childNodes)
 
+proc luaTableDef*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkTableDef.luaTree(childNodes)
+
+proc luaDotExpr*(childNodes: varargs[LuaNode]): LuaNode =
+  lnkDotExpr.luaTree(childNodes)
+
 proc len*(n: LuaNode): int =
   n.childNodes.len
 

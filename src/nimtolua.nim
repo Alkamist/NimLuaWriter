@@ -1,5 +1,5 @@
 import
-  #compiler/[sighashes],
+  compiler/[types],
   std/[tables, sequtils],
   hnimast/[compiler_aux, hast_common],
   lua
@@ -18,7 +18,6 @@ proc unpackValues[K, V](t: Table[K, V], keySet: set[K]): seq[V] =
 
 const
   SpecialExprs = {nkCaseStmt, nkIfExpr, nkBlockExpr, nkStmtListExpr}
-  NimLuaFriendlyKinds = [nkEmpty, nkIdent, nkSym]
   NimLiteralsToStrs = {
     nkCharLit: "char",
     nkIntLit: "int", nkInt8Lit: "int8", nkInt16Lit: "int16",
@@ -30,17 +29,31 @@ const
     nkStrLit: "string", nkRStrLit: "string", nkTripleStrLit: "string",
     nkNilLit: "nil",
   }.toTable
-  NimLiteralKinds = NimLiteralsToStrs.unpackKeys
-  NimTypeStrs = NimLiteralsToStrs.unpackValues.deduplicate
+  # NimLiteralKinds = NimLiteralsToStrs.unpackKeys
+  # NimTypeStrs = NimLiteralsToStrs.unpackValues.deduplicate
   IntTypeStrs = NimLiteralsToStrs.unpackValues({nkIntLit..nkInt64Lit})
   UIntTypeStrs = NimLiteralsToStrs.unpackValues({nkUIntLit..nkUInt64Lit})
   FloatTypeStrs = NimLiteralsToStrs.unpackValues({nkFloatLit..nkFloat128Lit})
   BoolTypeStr = "bool"
-  BoolValues = ["true", "false"]
+  # BoolValues = ["true", "false"]
 
 converter toLuaNode(n: PNode): LuaNode
 
 ####################################################################
+
+proc luaDefaultValue(n: PNode): LuaNode =
+  case n.typ.kind:
+  of tyFloat..tyFloat128: luaFloatLit(0.0)
+  of tyInt..tyInt64: luaIntLit(0)
+  of tyUInt..tyUInt64: luaIntLit(0)
+  of tyString, tyCString: luaStrLit("")
+  of tyObject: luaCall(luaIdent($n.typ & "_init"))
+  else: raise newException(IOError, "Unsupported type kind for default value: " & $n.typ.kind)
+
+var tempVarCount = 0
+proc genTempVarName(): string =
+  result = "TEMP_" & $tempVarCount
+  tempVarCount += 1
 
 proc containsSpecialExpr(n: PNode): bool =
   if n.kind in SpecialExprs:
@@ -86,8 +99,7 @@ proc specialExprResolution(n: PNode, varSym: PNode): (LuaNode, LuaNode) =
 
     result = (exprResolutions, exprAssignments)
   else:
-    #let exprSym = nskVar.genSym(varSym.strVal)
-    let exprSym = luaIdent("TEMP")
+    let exprSym = luaIdent(genTempVarName())
 
     var exprResolutions = luaStmtList(
       luaLocal(exprSym),
@@ -98,12 +110,12 @@ proc specialExprResolution(n: PNode, varSym: PNode): (LuaNode, LuaNode) =
 
 ####################################################################
 
-# proc toLuaOperator(n: PNode): LuaNode =
-#   luaIdent(
-#     case n.strVal:
-#     of "!=": lokNotEquals.toString
-#     else: n.strVal
-#   )
+proc toLuaOperator(n: PNode): LuaNode =
+  luaIdent(
+    case $n:
+    of "!=": lokNotEquals.toString
+    else: $n
+  )
 
 proc nkLetOrVarSectionToLuaNode(n: PNode, sectionKind: TNodeKind): LuaNode =
   result = luaStmtList()
@@ -132,6 +144,51 @@ proc nkCaseStmtToLuaNode(n: PNode): LuaNode =
     else:
       result.add branch
 
+proc nkConvToLuaNode(n: PNode): LuaNode =
+  let toType = $n[0]
+
+  case toType:
+  of IntTypeStrs, UIntTypeStrs, FloatTypeStrs, BoolTypeStr:
+    let fromType = $n[1].typ
+
+    if fromType in IntTypeStrs and toType == BoolTypeStr or
+       fromType in UIntTypeStrs and toType == BoolTypeStr or
+       fromType in FloatTypeStrs and toType == BoolTypeStr or
+       fromType in FloatTypeStrs and toType in IntTypeStrs or
+       fromType == BoolTypeStr and toType in IntTypeStrs or
+       fromType == BoolTypeStr and toType in UIntTypeStrs or
+       fromType == BoolTypeStr and toType in FloatTypeStrs:
+      result = luaCall(luaIdent(fromType & "_to_" & toType), n[1])
+    else:
+      result = n[1]
+  else:
+    result = n[1]
+
+proc nkTypeDefToLuaNode(n: PNode): LuaNode =
+  var fnBody = luaStmtList(luaLocal(luaAsgn(luaIdent("self"), luaTableDef())))
+
+  for identDefs in n[2][2]:
+    for varSym in identDefs[0 ..^ 3]:
+      fnBody.add luaAsgn(
+        luaDotExpr(luaIdent("self"), varSym),
+        identDefs[^2].luaDefaultValue(),
+      )
+
+  fnBody.add luaReturnStmt(luaIdent("self"))
+
+  result = luaLocal(luaAsgn(
+    luaIdent($n[0] & "_init"),
+    luaFnDef(
+      luaFnParams(),
+      fnBody,
+    ),
+  ))
+
+proc nkObjConstrToLuaNode(n: PNode): LuaNode =
+  result = luaStmtList(luaCall(luaIdent($n.typ & "_init")))
+  for field in n[1 ..^ 1]:
+    result.add luaAsgn(field[0], field[1])
+
 template unpackTo(luaTreeFn: untyped): untyped =
   result = luaTreeFn()
   for child in n:
@@ -141,24 +198,28 @@ proc nkStmtListToLuaNode(n: PNode): LuaNode = unpackTo(luaStmtList)
 proc nkIfStmtToLuaNode(n: PNode): LuaNode = unpackTo(luaIfStmt)
 proc nkElifBranchToLuaNode(n: PNode): LuaNode = unpackTo(luaElseIfBranch)
 proc nkElseToLuaNode(n: PNode): LuaNode = unpackTo(luaElseBranch)
+proc nkTypeSectionToLuaNode(n: PNode): LuaNode = unpackTo(luaStmtList)
 
 converter toLuaNode(n: PNode): LuaNode =
   case n.kind
   of nkEmpty, nkIncludeStmt, nkConstSection: luaEmpty()
-  of nkIdent: luaIdent(n.strVal)
-  of nkSym: luaIdent($n)
+  of nkIdent, nkSym: luaIdent($n)
   of nkCharLit..nkUInt64Lit: luaIntLit(n.intVal.int)
   of nkFloatLit..nkFloat64Lit: luaFloatLit(n.floatVal.float)
   of nkStrLit..nkTripleStrLit: luaStrLit(n.strVal)
   of nkDiscardStmt: n[0]
+  of nkAsgn: luaAsgn(n[0], n[1])
+  of nkInfix: luaInfix(n[0], n[1], n[2])
+  of nkTypeSection: n.nkTypeSectionToLuaNode()
   of nkStmtList: n.nkStmtListToLuaNode()
   of nkLetSection, nkVarSection: n.nkLetOrVarSectionToLuaNode(n.kind)
   of nkCaseStmt: n.nkCaseStmtToLuaNode()
   of nkIfStmt, nkIfExpr: n.nkIfStmtToLuaNode()
   of nkElifBranch, nkElifExpr: n.nkElifBranchToLuaNode()
   of nkElse, nkElseExpr: n.nkElseToLuaNode()
-  of nkAsgn: luaAsgn(n[0], n[1])
-  of nkInfix: luaInfix(n[0], n[1], n[2])
+  of nkConv: n.nkConvToLuaNode()
+  of nkTypeDef: n.nkTypeDefToLuaNode()
+  of nkObjConstr: n.nkObjConstrToLuaNode()
   else: raise newException(IOError, "Unsupported PNode kind: " & $n.kind)
 
 proc writeLua*(nimCode: string, indentationSpaces: int): string =

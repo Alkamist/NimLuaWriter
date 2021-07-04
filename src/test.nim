@@ -27,26 +27,21 @@
 #   Point2d = object
 #     x, y: float
 
-#   Point3d = object
-#     p2d: Point2d
-#     z: float
+#   TestEnum = enum
+#     teField0,
+#     teField1,
 
-# let a = Point3d(z: 3.0)
+# let a = teField0
 
-# discard a.x + 1
-# discard a.x + a.y
+# let b = if a == teField1: 1 else: 2
+
+# let point = Point2d(y: 3.0)
 
 
-type
-  Point2d = object
-    x, y: float
-
-  TestEnum = enum
-    teField0,
-    teField1,
-
-let a = teField0
-
-let b = if a == teField1: 1 else: 2
-
-let point = Point2d(y: 3.0)
+proc test(a: int): int =
+  var b = 2
+  var c = 3
+  if b == 1:
+    a
+  else:
+    c

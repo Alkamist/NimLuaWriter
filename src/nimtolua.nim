@@ -142,6 +142,16 @@ proc nkSymToLuaNode(n: PNode): LuaNode =
   else:
     luaIdent($n)
 
+proc nkAsgnToLuaNode(n: PNode): LuaNode =
+  if n[1].containsSpecialExpr():
+    let (exprResolutions, exprAssignments) = n[1].specialExprResolution(n[0])
+    result = luaStmtList(
+      exprResolutions,
+      luaAsgn(n[0], exprAssignments),
+    )
+  else:
+    result = luaAsgn(n[0], n[1])
+
 proc nkLetOrVarSectionToLuaNode(n: PNode, sectionKind: TNodeKind): LuaNode =
   result = luaStmtList()
   for identDefs in n:
@@ -213,6 +223,33 @@ proc nkTypeDefToLuaNode(n: PNode): LuaNode =
     ))
   else: raise newException(IOError, "Unsupported type kind for type def: " & $n[0].typ.kind)
 
+proc nkProcDefToLuaNode(n: PNode): LuaNode =
+  var
+    fnNameStr = $n[0]
+    fnParams = luaFnParams()
+  for identDefs in n[3][1 ..^ 1]:
+    for varSym in identDefs[0 ..^ 3]:
+      fnNameStr.add "_" & $varSym.typ
+      fnParams.add varSym
+
+  var fnBody =
+    if n[6].kind == nkAsgn:
+      luaStmtList(
+        luaLocal(n[6][0]),
+        n[6],
+        luaReturnStmt(n[6][0]),
+      )
+    else:
+      n[6]
+
+  result = luaLocal(luaAsgn(
+    luaIdent(fnNameStr),
+    luaFnDef(
+      fnParams,
+      fnBody,
+    ),
+  ))
+
 template unpackTo(luaTreeFn: untyped): untyped =
   result = luaTreeFn()
   for child in n:
@@ -232,11 +269,12 @@ converter toLuaNode(n: PNode): LuaNode =
   of nkFloatLit..nkFloat64Lit: luaFloatLit(n.floatVal.float)
   of nkStrLit..nkTripleStrLit: luaStrLit(n.strVal)
   of nkDiscardStmt: n[0]
-  of nkAsgn: luaAsgn(n[0], n[1])
+  of nkAsgn: n.nkAsgnToLuaNode()
   of nkInfix: luaInfix(n[0], n[1], n[2])
   of nkSym: n.nkSymToLuaNode()
   of nkTypeSection: n.nkTypeSectionToLuaNode()
-  of nkStmtList: n.nkStmtListToLuaNode()
+  of nkBlockStmt, nkBlockExpr: luaDoStmt(n.nkStmtListToLuaNode())
+  of nkStmtList, nkStmtListExpr: n.nkStmtListToLuaNode()
   of nkLetSection, nkVarSection: n.nkLetOrVarSectionToLuaNode(n.kind)
   of nkCaseStmt: n.nkCaseStmtToLuaNode()
   of nkIfStmt, nkIfExpr: n.nkIfStmtToLuaNode()
@@ -244,6 +282,7 @@ converter toLuaNode(n: PNode): LuaNode =
   of nkElse, nkElseExpr: n.nkElseToLuaNode()
   of nkConv: n.nkConvToLuaNode()
   of nkTypeDef: n.nkTypeDefToLuaNode()
+  of nkProcDef: n.nkProcDefToLuaNode()
   else: raise newException(IOError, "Unsupported PNode kind: " & $n.kind)
 
 proc writeLua*(nimCode: string, indentationSpaces: int): string =

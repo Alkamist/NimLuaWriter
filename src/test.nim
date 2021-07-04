@@ -1,26 +1,18 @@
-type
-  Point2d = object
-    x, y: float
+# type
+#   Point2d = object
+#     x, y: float
 
-proc translate(s, by: Point2d): Point2d =
-  result.x = s.x + by.x
-  result.y = s.y + by.y
+# proc `+`(a, b: Point2d): Point2d =
+#   result.x = a.x + b.x
+#   result.y = a.y + b.y
 
-proc translate(s: var Point2d, by: Point2d): Point2d =
-  s.x = s.x + by.x
-  s.y = s.y + by.y
+# let
+#   a = Point2d(x: 1.0, y: 2.0)
+#   b = Point2d(x: 3.0, y: 4.0)
 
-let pointLet = Point2d(y: 5.0)
-var pointVar = Point2d(y: 5.0)
+# echo a + b
 
-discard pointLet.translate(Point2d(x: 1.0, y: 2.0))
-discard pointVar.translate(Point2d(x: 1.0, y: 2.0))
+proc echo(message: string) {.importcpp: "reaper.ShowConsoleMsg(# .. \"\n\")".}
+# proc test(arg1, arg2, arg3, arg4: int) {.importcpp: "importTest(@)".}
 
-
-# proc test(a: int): int =
-#   a + 2
-
-# discard test(1)
-
-
-# let a = if true: 5 else: 1
+echo $5

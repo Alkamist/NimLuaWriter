@@ -1,6 +1,6 @@
 import
   compiler/types,
-  std/strutils,
+  std/[tables, strutils],
   hnimast/[compiler_aux, hast_common],
   lua
 
@@ -10,6 +10,7 @@ const
 type
   NimProgramState = object
     tempVarCount: int
+    nativeFns: Table[string, string]
 
 var s: NimProgramState
 
@@ -108,6 +109,35 @@ proc specialExprResolution(n: PNode, varName: string): (LuaNode, LuaNode) =
         )
 
     result = (exprResolutions, exprSym)
+
+proc processNativeFnStr(n: PNode, nativeStr: string): string =
+  var replaceArgId = 0
+
+  for c in nativeStr:
+    if replaceArgId < n.len - 1:
+      case c:
+
+      of '#':
+        result.add $n[replaceArgId+1]
+        replaceArgId += 1
+
+        continue
+
+      of '@':
+        while replaceArgId < n.len - 1:
+          result.add $n[replaceArgId+1]
+
+          if replaceArgId < n.len - 2:
+            result.add ", "
+
+          replaceArgId += 1
+
+        continue
+
+      else:
+        discard
+
+    result.add c
 
 ####################################################################
 
@@ -240,16 +270,23 @@ proc nkProcDefToLuaNode(n: PNode): LuaNode =
   else:
     fnBody.add n[6]
 
-  result = luaStmtList(
-    fnParamsExprResolutions,
-    luaLocal(luaAsgn(
-      luaIdent(fnNameStr),
-      luaFnDef(
-        fnParams,
-        fnBody,
+  if n[4].kind == nkPragma and
+     n[4][0].kind == nkExprColonExpr and
+     n[4][0][0].kind == nkIdent and
+     $n[4][0][0] == "importcpp":
+    s.nativeFns[fnNameStr] = n[4][0][1].strVal
+    result = luaEmpty()
+  else:
+    result = luaStmtList(
+      fnParamsExprResolutions,
+      luaLocal(luaAsgn(
+        luaIdent(fnNameStr),
+        luaFnDef(
+          fnParams,
+          fnBody,
+        ),
       ),
-    ),
-  ))
+    ))
 
 proc nkCallToLuaNode(n: PNode): LuaNode =
   var callNameStr = $n[0]
@@ -269,22 +306,25 @@ proc nkCallToLuaNode(n: PNode): LuaNode =
     else:
       callNameStr.add actualArg.typ.kind.toHumanStr()
 
-  var
-    callNode = luaCall(luaIdent(callNameStr))
-    callExprResolutions = luaStmtList()
+  if s.nativeFns.contains(callNameStr):
+    result = luaIdent(n.processNativeFnStr(s.nativeFns[callNameStr]))
+  else:
+    var
+      callNode = luaCall(luaIdent(callNameStr))
+      callExprResolutions = luaStmtList()
 
-  for callArg in n[1 ..^ 1]:
-    if callArg.containsSpecialExpr():
-      let (exprResolutions, exprAssignments) = callArg.specialExprResolution(callNameStr)
-      callExprResolutions.add exprResolutions
-      callNode.add exprAssignments
-    else:
-      callNode.add callArg
+    for callArg in n[1 ..^ 1]:
+      if callArg.containsSpecialExpr():
+        let (exprResolutions, exprAssignments) = callArg.specialExprResolution(callNameStr)
+        callExprResolutions.add exprResolutions
+        callNode.add exprAssignments
+      else:
+        callNode.add callArg
 
-  result = luaStmtList(
-    callExprResolutions,
-    callNode,
-  )
+    result = luaStmtList(
+      callExprResolutions,
+      callNode,
+    )
 
 template unpackTo(luaTreeFn: untyped): untyped =
   result = luaTreeFn()
@@ -299,7 +339,7 @@ proc nkTypeSectionToLuaNode(n: PNode): LuaNode = unpackTo(luaStmtList)
 
 converter toLuaNode(n: PNode): LuaNode =
   case n.kind
-  of nkEmpty, nkIncludeStmt, nkConstSection: luaEmpty()
+  of nkEmpty, nkIncludeStmt, nkConstSection, nkPragma: luaEmpty()
   of nkIdent: luaIdent($n)
   of nkCharLit..nkUInt64Lit: luaIntLit(n.intVal.int)
   of nkFloatLit..nkFloat64Lit: luaFloatLit(n.floatVal.float)

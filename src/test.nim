@@ -1,49 +1,26 @@
-# let a = case 5:
-#   of 1: 1
-#   of 2: 2
-#   else: 3
+type
+  Point2d = object
+    x, y: float
 
-# if true:
-#   a = 1
-# else:
-#   a = 2
+proc translate(s, by: Point2d): Point2d =
+  result.x = s.x + by.x
+  result.y = s.y + by.y
 
+proc translate(s: var Point2d, by: Point2d): Point2d =
+  s.x = s.x + by.x
+  s.y = s.y + by.y
 
-# var a = 1
+let pointLet = Point2d(y: 5.0)
+var pointVar = Point2d(y: 5.0)
 
-# case 5:
-# of 1: a = 1
-# of 2: a = 2
-# else: a = 3
-
-
-# let b = 1
-# let a = (if b == 2: 2 else: 3) + (if b == 3: 3 else: 2)
-
-# discard a.bool
+discard pointLet.translate(Point2d(x: 1.0, y: 2.0))
+discard pointVar.translate(Point2d(x: 1.0, y: 2.0))
 
 
-# type
-#   Point2d = object
-#     x, y: float
+# proc test(a = 1): int =
+#   a + 2
 
-#   TestEnum = enum
-#     teField0,
-#     teField1,
+# discard test(if true: 5 else: 1)
 
-# let a = teField0
 
-# let b = if a == teField1: 1 else: 2
-
-# let point = Point2d(y: 3.0)
-# let arg = 7
-# proc test*(a = if true: 1 else: arg): int =
-#   var b = 2
-#   var c = 3
-#   if b == 1:
-#     a
-#   else:
-#     c
-
-let a = 1
-discard a.bool
+# let a = if true: 5 else: 1

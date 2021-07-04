@@ -1,5 +1,6 @@
 import
   compiler/types,
+  std/strutils,
   hnimast/[compiler_aux, hast_common],
   lua
 
@@ -69,23 +70,23 @@ proc convertToExpression(n: LuaNode, varName: string): LuaNode =
   else:
     result = luaAsgn(luaIdent(varName), n)
 
-proc specialExprResolution(n: PNode, varSym: PNode): (LuaNode, LuaNode) =
+proc specialExprResolution(n: PNode, varName: string): (LuaNode, LuaNode) =
   if n.kind == nkInfix:
     var
       exprResolutions = luaStmtList()
       exprAssignments = luaInfix(n[0])
 
-    let (leftResolutions, leftAssignments) = n[1].specialExprResolution(varSym)
+    let (leftResolutions, leftAssignments) = n[1].specialExprResolution(varName)
     exprResolutions.add leftResolutions
     exprAssignments.add leftAssignments
 
-    let (rightResolutions, rightAssignments) = n[2].specialExprResolution(varSym)
+    let (rightResolutions, rightAssignments) = n[2].specialExprResolution(varName)
     exprResolutions.add rightResolutions
     exprAssignments.add rightAssignments
 
     result = (exprResolutions, exprAssignments)
   else:
-    let exprSym = luaIdent(s.genTempVarName($varSym))
+    let exprSym = luaIdent(s.genTempVarName(varName))
 
     var exprResolutions =
       if n.kind == nkObjConstr:
@@ -125,7 +126,7 @@ proc nkSymToLuaNode(n: PNode): LuaNode =
 
 proc nkAsgnToLuaNode(n: PNode): LuaNode =
   if n[1].containsSpecialExpr():
-    let (exprResolutions, exprAssignments) = n[1].specialExprResolution(n[0])
+    let (exprResolutions, exprAssignments) = n[1].specialExprResolution($n[0])
     result = luaStmtList(
       exprResolutions,
       luaAsgn(n[0], exprAssignments),
@@ -139,7 +140,7 @@ proc nkLetOrVarSectionToLuaNode(n: PNode, sectionKind: TNodeKind): LuaNode =
     let value = identDefs[^1]
     for varSym in identDefs[0 ..^ 3]:
       if value.containsSpecialExpr():
-        let (exprResolutions, exprAssignments) = value.specialExprResolution(varSym)
+        let (exprResolutions, exprAssignments) = value.specialExprResolution($varSym)
         result.add exprResolutions
         result.add luaLocal(luaAsgn(varSym, exprAssignments))
       else:
@@ -219,24 +220,23 @@ proc nkProcDefToLuaNode(n: PNode): LuaNode =
   for identDefs in n[3][1 ..^ 1]:
     let value = identDefs[^1]
     for varSym in identDefs[0 ..^ 3]:
-      fnNameStr.add "_" & $varSym.typ
+      fnNameStr.add "_" & ($varSym.typ).replace(" ")
       fnParams.add varSym
 
-      if value.containsSpecialExpr():
-        let (exprResolutions, exprAssignments) = value.specialExprResolution(varSym)
-        fnParamsExprResolutions.add exprResolutions
-        fnParamsDefaultValueInits.add varSym.luaDefaultValueInit(exprAssignments)
-      else:
-        if value.kind == nkEmpty:
-          fnParamsDefaultValueInits.add varSym
+      if value.kind != nkEmpty:
+        if value.containsSpecialExpr():
+          let (exprResolutions, exprAssignments) = value.specialExprResolution($varSym)
+          fnParamsExprResolutions.add exprResolutions
+          fnParamsDefaultValueInits.add varSym.luaDefaultValueInit(exprAssignments)
         else:
-          fnParamsDefaultValueInits.add luaAsgn(varSym, value)
+          fnParamsDefaultValueInits.add varSym.luaDefaultValueInit(value)
 
+  let fnHasResult = n[3][0].kind != nkEmpty
   var fnBody = luaStmtList(fnParamsDefaultValueInits)
-  if n[6].kind == nkAsgn:
-    fnBody.add luaLocal(n[6][0])
+  if fnHasResult:
+    fnBody.add luaLocal(luaAsgn(n[7], n[3][0].luaDefaultValue()))
     fnBody.add n[6]
-    fnBody.add luaReturnStmt(n[6][0])
+    fnBody.add luaReturnStmt(n[7])
   else:
     fnBody.add n[6]
 
@@ -250,6 +250,41 @@ proc nkProcDefToLuaNode(n: PNode): LuaNode =
       ),
     ),
   ))
+
+proc nkCallToLuaNode(n: PNode): LuaNode =
+  var callNameStr = $n[0]
+
+  for callArg in n[1 ..^ 1]:
+    callNameStr.add "_"
+
+    let actualArg =
+      if callArg.kind == nkHiddenAddr:
+        callNameStr.add "var"
+        callArg[0]
+      else:
+        callArg
+
+    if actualArg.typ.kind == tyObject:
+      callNameStr.add $actualArg.typ
+    else:
+      callNameStr.add actualArg.typ.kind.toHumanStr()
+
+  var
+    callNode = luaCall(luaIdent(callNameStr))
+    callExprResolutions = luaStmtList()
+
+  for callArg in n[1 ..^ 1]:
+    if callArg.containsSpecialExpr():
+      let (exprResolutions, exprAssignments) = callArg.specialExprResolution(callNameStr)
+      callExprResolutions.add exprResolutions
+      callNode.add exprAssignments
+    else:
+      callNode.add callArg
+
+  result = luaStmtList(
+    callExprResolutions,
+    callNode,
+  )
 
 template unpackTo(luaTreeFn: untyped): untyped =
   result = luaTreeFn()
@@ -269,9 +304,10 @@ converter toLuaNode(n: PNode): LuaNode =
   of nkCharLit..nkUInt64Lit: luaIntLit(n.intVal.int)
   of nkFloatLit..nkFloat64Lit: luaFloatLit(n.floatVal.float)
   of nkStrLit..nkTripleStrLit: luaStrLit(n.strVal)
-  of nkDiscardStmt: n[0]
+  of nkDiscardStmt, nkHiddenDeref, nkHiddenAddr: n[0]
   of nkAsgn: n.nkAsgnToLuaNode()
   of nkInfix: luaInfix(n[0], n[1], n[2])
+  of nkDotExpr: luaDotExpr(n[0], n[1])
   of nkSym: n.nkSymToLuaNode()
   of nkTypeSection: n.nkTypeSectionToLuaNode()
   of nkBlockStmt, nkBlockExpr: luaDoStmt(n.nkStmtListToLuaNode())
@@ -284,6 +320,7 @@ converter toLuaNode(n: PNode): LuaNode =
   of nkConv: n.nkConvToLuaNode()
   of nkTypeDef: n.nkTypeDefToLuaNode()
   of nkProcDef: n.nkProcDefToLuaNode()
+  of nkCall, nkCommand: n.nkCallToLuaNode()
   else: raise newException(IOError, "Unsupported PNode kind: " & $n.kind)
 
 proc writeLua*(nimCode: string, indentationSpaces: int): string =

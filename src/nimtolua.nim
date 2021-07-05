@@ -6,6 +6,14 @@ import
 
 const
   SpecialExprs = {nkCaseStmt, nkIfExpr, nkBlockExpr, nkStmtListExpr, nkObjConstr}
+  NimOpChars = ['=', '+', '-', '*', '/', '<', '>', '@', '$', '~',
+                '&', '%', '|', '!','?', '^', '.', ':', '\\']
+  NimKeywordOps = ["and", "or", "not", "xor", "shl", "shr", "div", "mod",
+                   "in", "notin", "is", "isnot", "of", "as", "from"]
+  NimShortcutOps = ["+=", "-=", "*=", "/=", "%="]
+  LuaBinaryOps = ["+", "-", "*", "/", "%", "^", "=", "~=", "==",
+                  ">", ">=", "<", "<=", "and", "or", ".."]
+  LuaUnaryOps = ["not", "#"]
 
 type
   NimProgramState = object
@@ -14,13 +22,72 @@ type
 
 var s: NimProgramState
 
-proc genTempVarName(s: var NimProgramState, varName: string): string =
-  result = varName & "_temp_" & $s.tempVarCount
+proc genTempVarName(s: var NimProgramState): string =
+  result = "TEMP_" & $s.tempVarCount
   s.tempVarCount += 1
 
 converter toLuaNode(n: PNode): LuaNode
 
 ####################################################################
+
+proc nimOperatorCharToWord(op: char): string =
+  case op:
+  of '=': "equals"
+  of '+': "plus"
+  of '-': "minus"
+  of '*': "star"
+  of '/': "slash"
+  of '<': "lesser"
+  of '>': "greater"
+  of '@': "at"
+  of '$': "dollar"
+  of '~': "tilde"
+  of '&': "ampersand"
+  of '%': "percent"
+  of '|': "vertbar"
+  of '!': "exclaim"
+  of '?': "question"
+  of '^': "caret"
+  of '.': "dot"
+  of ':': "colon"
+  of '\\': "backslash"
+  else: raise newException(IOError, "Unsupported char for nimOperatorToWord: " & op)
+
+proc nimOperatorToFnName(op: string): string =
+  result = "operator"
+
+  if op in NimKeywordOps:
+    result.add "_" & op
+
+  else:
+    for c in op:
+      result.add "_" & c.nimOperatorCharToWord()
+
+proc nkProcDefIsOperatorOverload(n: PNode): bool =
+  let procNameStr = $n[0]
+  procNameStr[0] in NimOpChars or procNameStr in NimKeywordOps
+
+proc nkProcDefNameStr(n: PNode): string =
+  let originalFnNameStr = $n[0]
+
+  if n.nkProcDefIsOperatorOverload():
+    result = originalFnNameStr.nimOperatorToFnName()
+  else:
+    result = originalFnNameStr
+
+  for identDefs in n[3][1 ..^ 1]:
+    let value = identDefs[^1]
+    for varSym in identDefs[0 ..^ 3]:
+      result.add "_" & ($varSym.typ).replace(" ")
+
+proc typeIsBuiltin(n: PNode): bool =
+  n.typ.kind != tyObject
+
+proc isBuiltinBinaryOperator(n, left, right: PNode): bool =
+  n.sym.kind == skProc and
+  left.typeIsBuiltin() and
+  right.typeIsBuiltin() and
+  $n in LuaBinaryOps
 
 proc luaDefaultValue(n: PNode): LuaNode =
   case n.typ.kind:
@@ -71,23 +138,23 @@ proc convertToExpression(n: LuaNode, varName: string): LuaNode =
   else:
     result = luaAsgn(luaIdent(varName), n)
 
-proc specialExprResolution(n: PNode, varName: string): (LuaNode, LuaNode) =
+proc specialExprResolution(n: PNode): (LuaNode, LuaNode) =
   if n.kind == nkInfix:
     var
       exprResolutions = luaStmtList()
       exprAssignments = luaInfix(n[0])
 
-    let (leftResolutions, leftAssignments) = n[1].specialExprResolution(varName)
+    let (leftResolutions, leftAssignments) = n[1].specialExprResolution()
     exprResolutions.add leftResolutions
     exprAssignments.add leftAssignments
 
-    let (rightResolutions, rightAssignments) = n[2].specialExprResolution(varName)
+    let (rightResolutions, rightAssignments) = n[2].specialExprResolution()
     exprResolutions.add rightResolutions
     exprAssignments.add rightAssignments
 
     result = (exprResolutions, exprAssignments)
   else:
-    let exprSym = luaIdent(s.genTempVarName(varName))
+    let exprSym = luaIdent(s.genTempVarName())
 
     var exprResolutions =
       if n.kind == nkObjConstr:
@@ -161,7 +228,7 @@ proc nkSymToLuaNode(n: PNode): LuaNode =
 
 proc nkAsgnToLuaNode(n: PNode): LuaNode =
   if n[1].containsSpecialExpr():
-    let (exprResolutions, exprAssignments) = n[1].specialExprResolution($n[0])
+    let (exprResolutions, exprAssignments) = n[1].specialExprResolution()
     result = luaStmtList(
       exprResolutions,
       luaAsgn(n[0], exprAssignments),
@@ -172,9 +239,9 @@ proc nkAsgnToLuaNode(n: PNode): LuaNode =
 proc nkInfixToLuaNode(n: PNode): LuaNode =
   let operator = n[0].toLuaOperator()
 
-  if $n[0] in ["+=", "-=", "*=", "/=", "%="]:
+  if $n[0] in NimShortcutOps:
     if n[2].containsSpecialExpr():
-      let (exprResolutions, exprAssignments) = n[2].specialExprResolution($n[1])
+      let (exprResolutions, exprAssignments) = n[2].specialExprResolution()
       result = luaStmtList(
         exprResolutions,
         luaAsgn(n[1], luaInfix(operator, n[1], exprAssignments)),
@@ -182,7 +249,10 @@ proc nkInfixToLuaNode(n: PNode): LuaNode =
     else:
       result = luaAsgn(n[1], luaInfix(operator, n[1], n[2]))
   else:
-    result = luaInfix(operator, n[1], n[2])
+    if n[0].isBuiltinBinaryOperator(n[1], n[2]):
+      result = luaInfix(operator, n[1], n[2])
+    else:
+      result = luaCall(luaIdent(($n[0]).nimOperatorToFnName()), n[1], n[2])
 
 proc nkLetOrVarSectionToLuaNode(n: PNode, sectionKind: TNodeKind): LuaNode =
   result = luaStmtList()
@@ -190,7 +260,7 @@ proc nkLetOrVarSectionToLuaNode(n: PNode, sectionKind: TNodeKind): LuaNode =
     let value = identDefs[^1]
     for varSym in identDefs[0 ..^ 3]:
       if value.containsSpecialExpr():
-        let (exprResolutions, exprAssignments) = value.specialExprResolution($varSym)
+        let (exprResolutions, exprAssignments) = value.specialExprResolution()
         result.add exprResolutions
         result.add luaLocal(luaAsgn(varSym, exprAssignments))
       else:
@@ -262,7 +332,7 @@ proc nkTypeDefToLuaNode(n: PNode): LuaNode =
 
 proc nkProcDefToLuaNode(n: PNode): LuaNode =
   var
-    fnNameStr = $n[0]
+    fnNameStr = n.nkProcDefNameStr()
     fnParams = luaFnParams()
     fnParamsExprResolutions = luaStmtList()
     fnParamsDefaultValueInits = luaStmtList()
@@ -270,12 +340,11 @@ proc nkProcDefToLuaNode(n: PNode): LuaNode =
   for identDefs in n[3][1 ..^ 1]:
     let value = identDefs[^1]
     for varSym in identDefs[0 ..^ 3]:
-      fnNameStr.add "_" & ($varSym.typ).replace(" ")
       fnParams.add varSym
 
       if value.kind != nkEmpty:
         if value.containsSpecialExpr():
-          let (exprResolutions, exprAssignments) = value.specialExprResolution($varSym)
+          let (exprResolutions, exprAssignments) = value.specialExprResolution()
           fnParamsExprResolutions.add exprResolutions
           fnParamsDefaultValueInits.add varSym.luaDefaultValueInit(exprAssignments)
         else:
@@ -335,7 +404,7 @@ proc nkCallToLuaNode(n: PNode): LuaNode =
 
     for callArg in n[1 ..^ 1]:
       if callArg.containsSpecialExpr():
-        let (exprResolutions, exprAssignments) = callArg.specialExprResolution(callNameStr)
+        let (exprResolutions, exprAssignments) = callArg.specialExprResolution()
         callExprResolutions.add exprResolutions
         callNode.add exprAssignments
       else:

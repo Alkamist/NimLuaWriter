@@ -1,5 +1,3 @@
-import std/options
-
 type
   GTypeKind* {.pure.} = enum
     Nil,
@@ -7,93 +5,118 @@ type
     Int, Int8, Int16, Int32, Int64,
     UInt, UInt8, UInt16, UInt32, UInt64,
     Float, Float32, Float64, Float128,
-    String,
-    Object, Enum, EnumField
+    String, Bool,
 
-  GLiteralKind* {.pure.} = enum
-    Nil,
-    Char,
-    Int, Int8, Int16, Int32, Int64,
-    UInt, UInt8, UInt16, UInt32, UInt64,
-    Float, Float32, Float64, Float128,
-    String,
-
-  GMutability* {.pure.} = enum
-    Immutable, Mutable,
+  GSymbolKind* {.pure.} = enum
+    Type, Let, Var,
 
   GNodeKind* {.pure.} = enum
-    Type, Symbol, Literal,
-    Definition, Assignment,
-    List,
-
-  # NodeKind* {.pure.} = enum
-  #   List,
-  #   Definition, Assignment,
-  #   Conditional,
-  #   Loop, Break, Continue,
-  #   Call, Return,
-  #   Dot, Bracket,
-  #   Prefix, Infix,
-  #   Parenthesis,
-  #   Symbol, Literal,
-
-
-type
-  GEnumField* = object
-    name*: string
-
-  GType* = object
-    case kind*: GTypeKind
-    of GTypeKind.EnumField: enumField*: GEnumField
-    else: discard
-
-  GSymbol* = object
-    identifier*: string
-    mutability*: GMutability
-    typ*: GType
-    value*: Option[GNode]
-
-  GLiteral* = object
-    case kind*: GLiteralKind
-    of GLiteralKind.Nil: discard
-    of GLiteralKind.Char..GLiteralKind.UInt64: intValue*: BiggestInt
-    of GLiteralKind.Float..GLiteralKind.Float128: floatValue*: float
-    of GLiteralKind.String: stringValue*: string
-
-  GDefinition* = object
-    symbol*: GSymbol
-    value*: Option[GNode]
-
-  GAssignment* = object
-    symbol*: GSymbol
-    value*: GNode
-
-  GList* = object
-    nodes*: seq[GNode]
+    Empty,
+    Identifier,
+    CharLiteral,
+    IntLiteral, Int8Literal, Int16Literal, Int32Literal, Int64Literal,
+    UIntLiteral, UInt8Literal, UInt16Literal, UInt32Literal, UInt64Literal,
+    FloatLiteral, Float32Literal, Float64Literal, Float128Literal,
+    StringLiteral, BoolLiteral,
+    NilLiteral,
+    Type, Symbol,
+    StatementList,
+    LetDefinition, VarDefinition,
 
   GNode* = ref object
     case kind*: GNodeKind
-    of GNodeKind.Type: typ*: GType
-    of GNodeKind.Symbol: symbol*: GSymbol
-    of GNodeKind.Literal: literal*: GLiteral
-    of GNodeKind.Definition: definition*: GDefinition
-    of GNodeKind.Assignment: assignment*: GAssignment
-    of GNodeKind.List: list*: GList
+    of GNodeKind.Empty, GNodeKind.NilLiteral: discard
+    of GNodeKind.CharLiteral..GNodeKind.UInt64Literal: intValue*: BiggestInt
+    of GNodeKind.FloatLiteral..GNodeKind.Float128Literal: floatValue*: BiggestFloat
+    of GNodeKind.Identifier, GNodeKind.StringLiteral: stringValue*: string
+    of GNodeKind.BoolLiteral: boolValue*: bool
+    of GNodeKind.Type: typeKind*: GTypeKind
+    of GNodeKind.Symbol:
+      symbolName*: string
+      symbolKind*: GSymbolKind
+      symbolType*: GNode
+      symbolOwner*: GNode
+    of GNodeKind.LetDefinition:
+      letDefinitionSymbol*: GNode
+      letDefinitionType*: GNode
+      letDefinitionValue*: GNode
+    of GNodeKind.VarDefinition:
+      varDefinitionSymbol*: GNode
+      varDefinitionType*: GNode
+      varDefinitionValue*: GNode
+    else: children*: seq[GNode]
 
-proc newGNode*(s: GType): GNode =
-  GNode(kind: GNodeKind.Type, typ: s)
+proc newGEmpty*(): GNode =
+  GNode(kind: GNodeKind.Empty)
 
-proc newGNode*(s: GSymbol): GNode =
-  GNode(kind: GNodeKind.Symbol, symbol: s)
+proc newGIdentifier*(value: string): GNode =
+  GNode(kind: GNodeKind.Identifier, stringValue: value)
 
-proc newGNode*(s: GLiteral): GNode =
-  GNode(kind: GNodeKind.Literal, literal: s)
+proc newGCharLiteral*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.CharLiteral, intValue: value)
 
-proc newGNode*(s: GDefinition): GNode =
-  GNode(kind: GNodeKind.Definition, definition: s)
+proc newGIntLiteral*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.IntLiteral, intValue: value)
 
-proc newGNode*(s: GAssignment): GNode =
-  GNode(kind: GNodeKind.Assignment, assignment: s)
+proc newGInt8Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.Int8Literal, intValue: value)
 
-proc newGNode*(s: GList): GNode =
-  GNode(kind: GNodeKind.List, list: s)
+proc newGInt16Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.Int16Literal, intValue: value)
+
+proc newGInt32Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.Int32Literal, intValue: value)
+
+proc newGInt64Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.Int64Literal, intValue: value)
+
+proc newGUIntLiteral*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.UIntLiteral, intValue: value)
+
+proc newGUInt8Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.UInt8Literal, intValue: value)
+
+proc newGUInt16Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.UInt16Literal, intValue: value)
+
+proc newGUInt32Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.UInt32Literal, intValue: value)
+
+proc newGUInt64Literal*(value: BiggestInt): GNode =
+  GNode(kind: GNodeKind.UInt64Literal, intValue: value)
+
+proc newGFloatLiteral*(value: BiggestFloat): GNode =
+  GNode(kind: GNodeKind.FloatLiteral, floatValue: value)
+
+proc newGFloat32Literal*(value: BiggestFloat): GNode =
+  GNode(kind: GNodeKind.Float32Literal, floatValue: value)
+
+proc newGFloat64Literal*(value: BiggestFloat): GNode =
+  GNode(kind: GNodeKind.Float64Literal, floatValue: value)
+
+proc newGFloat128Literal*(value: BiggestFloat): GNode =
+  GNode(kind: GNodeKind.Float128Literal, floatValue: value)
+
+proc newGStringLiteral*(value: string): GNode =
+  GNode(kind: GNodeKind.StringLiteral, stringValue: value)
+
+proc newGBoolLiteral*(value: bool): GNode =
+  GNode(kind: GNodeKind.BoolLiteral, boolValue: value)
+
+proc newGNilLiteral*(): GNode =
+  GNode(kind: GNodeKind.NilLiteral)
+
+proc newGType*(): GNode =
+  GNode(kind: GNodeKind.Type)
+
+proc newGSymbol*(): GNode =
+  GNode(kind: GNodeKind.Symbol)
+
+proc newGLetDefinition*(): GNode =
+  GNode(kind: GNodeKind.LetDefinition)
+
+proc newGVarDefinition*(): GNode =
+  GNode(kind: GNodeKind.VarDefinition)
+
+proc newGStatementList*(): GNode =
+  GNode(kind: GNodeKind.StatementList)

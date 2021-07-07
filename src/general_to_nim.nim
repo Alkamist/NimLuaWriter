@@ -1,9 +1,9 @@
-import std/options, general_ast
+import general_ast
 
 proc toNimCode*(n: GNode): string
 
-proc toNimCode(n: GType): string =
-  case n.kind:
+proc typeToNimCode(n: GNode): string =
+  case n.typeKind:
   of GTypeKind.Nil: "nil"
   of GTypeKind.Char: "char"
   of GTypeKind.Int: "int"
@@ -21,50 +21,48 @@ proc toNimCode(n: GType): string =
   of GTypeKind.Float64: "float64"
   of GTypeKind.Float128: "float128"
   of GTypeKind.String: "string"
-  of GTypeKind.Object: "object"
-  of GTypeKind.Enum: "enum"
-  of GTypeKind.EnumField: n.enumField.name
+  of GTypeKind.Bool: "bool"
 
-proc toNimCode(n: GLiteral): string =
-  case n.kind:
-  of GLiteralKind.Nil: "nil"
-  of GLiteralKind.Char..GLiteralKind.UInt64: $n.intValue
-  of GLiteralKind.Float..GLiteralKind.Float128: $n.floatValue
-  of GLiteralKind.String: "\"" & n.stringValue & "\""
+proc symbolToNimCode(n: GNode): string =
+  n.symbolName
 
-proc toNimCode(n: GSymbol): string =
-  n.identifier
-
-proc toNimCode(n: GDefinition): string =
-  case n.symbol.mutability:
-  of GMutability.Immutable: result.add "let "
-  of GMutability.Mutable: result.add "var "
-
-  result.add n.symbol.identifier
-  result.add ": "
-  result.add n.symbol.typ.toNimCode
-
-  if n.value.isSome:
+proc letDefinitionToNimCode(n: GNode): string =
+  result.add "let "
+  result.add n.letDefinitionSymbol.toNimCode
+  if n.letDefinitionType.kind != GNodeKind.Empty:
+    result.add ": "
+    result.add n.letDefinitionType.toNimCode
+  if n.letDefinitionValue.kind != GNodeKind.Empty:
     result.add " = "
-    result.add n.value.get.toNimCode
+    result.add n.letDefinitionValue.toNimCode
 
-# proc toNimCode(n: GAssignment): string =
-#   result.add n.symbol.toNimCode
-#   result.add " = "
-#   result.add n.symbol.value.toNimCode
+proc varDefinitionToNimCode(n: GNode): string =
+  result.add "var "
+  result.add n.varDefinitionSymbol.toNimCode
+  if n.varDefinitionType.kind != GNodeKind.Empty:
+    result.add ": "
+    result.add n.varDefinitionType.toNimCode
+  if n.varDefinitionValue.kind != GNodeKind.Empty:
+    result.add " = "
+    result.add n.varDefinitionValue.toNimCode
 
-proc toNimCode(n: GList): string =
-  let lastId = n.nodes.len - 1
-  for i, node in n.nodes:
+proc statementListToNimCode(n: GNode): string =
+  let lastId = n.children.len - 1
+  for i, node in n.children:
     result.add node.toNimCode
     if i < lastId:
       result.add "\n"
 
 proc toNimCode*(n: GNode): string =
   case n.kind:
-  of GNodeKind.Type: n.typ.toNimCode
-  of GNodeKind.Symbol: n.symbol.toNimCode
-  of GNodeKind.Definition: n.definition.toNimCode
-  #of NodeKind.Assignment: n.assignment.toNimCode
-  of GNodeKind.List: n.list.toNimCode
-  else: ""
+  of GNodeKind.Empty: ""
+  of GNodeKind.NilLiteral: "nil"
+  of GNodeKind.CharLiteral..GNodeKind.UInt64Literal: $n.intValue
+  of GNodeKind.FloatLiteral..GNodeKind.Float128Literal: $n.floatValue
+  of GNodeKind.Identifier, GNodeKind.StringLiteral: "\"" & n.stringValue & "\""
+  of GNodeKind.BoolLiteral: $n.boolValue
+  of GNodeKind.Type: n.typeToNimCode
+  of GNodeKind.Symbol: n.symbolToNimCode
+  of GNodeKind.LetDefinition: n.letDefinitionToNimCode
+  of GNodeKind.VarDefinition: n.varDefinitionToNimCode
+  of GNodeKind.StatementList: n.statementListToNimCode

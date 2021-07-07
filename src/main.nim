@@ -4,11 +4,10 @@ macro test*(nimCode: typed): untyped =
   echo nimCode.toGNode.toNimCode
 
 test:
-  type Animal {.pure.} = enum
-    Dog, Cat,
+  let
+    a, b = 1
+    c = 2
 
-  let a = Animal.Dog
-
-  # let
-  #   a, b = 1
-  #   c = 2
+  var
+    d = 3
+    e = 4

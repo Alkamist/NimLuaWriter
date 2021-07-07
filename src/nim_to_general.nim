@@ -3,9 +3,12 @@ import std/[options, macros], general_ast
 proc toGNode*(n: NimNode): GNode
 
 proc symToGNode(n: NimNode): GNode =
-  echo n.getType.typeKind
-  GSymbol().newGNode
-  # symbol.identifier = $n
+  var symbol = GSymbol()
+
+  #symbol.identifier = $n
+
+  echo n.symKind
+
   # symbol.mutability = GMutability.Immutable
   # symbol.typ = GType(kind: GTypeKind.Int)
   # symbol.value = some(
@@ -14,6 +17,8 @@ proc symToGNode(n: NimNode): GNode =
   #     intValue: value.intVal,
   #   ).newGNode
   # )
+
+  symbol.newGNode
 
 proc stmtListToGNode(n: NimNode): GNode =
   var list = GList()
@@ -36,6 +41,7 @@ proc letSectionToGNode(n: NimNode): GNode =
 
 proc toGNode*(n: NimNode): GNode =
   case n.kind:
+  of nnkTypeSection: GList().newGNode
   of nnkSym: n.symToGNode
   of nnkStmtList: n.stmtListToGNode
   of nnkLetSection: n.letSectionToGNode

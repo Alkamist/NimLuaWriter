@@ -1,32 +1,30 @@
 import std/options
 
 type
-  BitPrecisionKind* {.pure.} = enum
-    SetBitCount, ArchitectureSpecific,
+  GTypeKind* {.pure.} = enum
+    Nil,
+    Char,
+    Int, Int8, Int16, Int32, Int64,
+    UInt, UInt8, UInt16, UInt32, UInt64,
+    Float, Float32, Float64, Float128,
+    String,
+    Object, Enum, EnumField
 
-  IntegerKind* {.pure.} = enum
-    Signed, Unsigned,
+  GLiteralKind* {.pure.} = enum
+    Nil,
+    Char,
+    Int, Int8, Int16, Int32, Int64,
+    UInt, UInt8, UInt16, UInt32, UInt64,
+    Float, Float32, Float64, Float128,
+    String,
 
-  IntegerRepresentation* {.pure.} = enum
-    Numerical, Character,
-
-  NumberKind* {.pure.} = enum
-    Integer, FloatingPoint
-
-  TypeKind* {.pure.} = enum
-    Void, Number, Boolean, String,
-
-  Mutability* {.pure.} = enum
+  GMutability* {.pure.} = enum
     Immutable, Mutable,
 
-  ConditionalKind* {.pure.} = enum
-    If, Case,
-
-  LoopKind* {.pure.} = enum
-    For, While,
-
-  NodeKind* {.pure.} = enum
-    Symbol, Definition, Assignment,
+  GNodeKind* {.pure.} = enum
+    Type, Symbol, Literal,
+    Definition, Assignment,
+    List,
 
   # NodeKind* {.pure.} = enum
   #   List,
@@ -39,46 +37,63 @@ type
   #   Parenthesis,
   #   Symbol, Literal,
 
+
 type
-  BitPrecision* = object
-    case kind*: BitPrecisionKind
-    of BitPrecisionKind.SetBitCount: bitCount*: int
-    of BitPrecisionKind.ArchitectureSpecific: discard
+  GEnumField* = object
+    name*: string
 
-  Number* = object
-    bitPrecision*: BitPrecision
-    case kind*: NumberKind
-    of NumberKind.Integer:
-      integerKind*: IntegerKind
-      integerValue*: BiggestInt
-      integerRepresentation*: IntegerRepresentation
-    of NumberKind.FloatingPoint:
-      floatingPointValue*: BiggestFloat
+  GType* = object
+    case kind*: GTypeKind
+    of GTypeKind.EnumField: enumField*: GEnumField
+    else: discard
 
-  Boolean* = object
-    value*: bool
+  GSymbol* = object
+    identifier*: string
+    mutability*: GMutability
+    typ*: GType
+    value*: Option[GNode]
 
-  String* = object
-    value*: string
+  GLiteral* = object
+    case kind*: GLiteralKind
+    of GLiteralKind.Nil: discard
+    of GLiteralKind.Char..GLiteralKind.UInt64: intValue*: BiggestInt
+    of GLiteralKind.Float..GLiteralKind.Float128: floatValue*: float
+    of GLiteralKind.String: stringValue*: string
 
-  Symbol* = object
-    mutability*: Mutability
-    case kind*: TypeKind
-    of TypeKind.Void: discard
-    of TypeKind.Number: numberValue*: Number
-    of TypeKind.Boolean: booleanValue*: Boolean
-    of TypeKind.String: stringValue*: String
+  GDefinition* = object
+    symbol*: GSymbol
+    value*: Option[GNode]
 
-  Definition* = object
-    symbol*: Symbol
-    value*: Node
+  GAssignment* = object
+    symbol*: GSymbol
+    value*: GNode
 
-  Assignment* = object
-    symbol*: Symbol
-    value*: Node
+  GList* = object
+    nodes*: seq[GNode]
 
-  Node* = ref object
-    case kind*: NodeKind
-    of NodeKind.Symbol: symbol*: Symbol
-    of NodeKind.Definition: definition*: Definition
-    of NodeKind.Assignment: assignment*: Assignment
+  GNode* = ref object
+    case kind*: GNodeKind
+    of GNodeKind.Type: typ*: GType
+    of GNodeKind.Symbol: symbol*: GSymbol
+    of GNodeKind.Literal: literal*: GLiteral
+    of GNodeKind.Definition: definition*: GDefinition
+    of GNodeKind.Assignment: assignment*: GAssignment
+    of GNodeKind.List: list*: GList
+
+proc newGNode*(s: GType): GNode =
+  GNode(kind: GNodeKind.Type, typ: s)
+
+proc newGNode*(s: GSymbol): GNode =
+  GNode(kind: GNodeKind.Symbol, symbol: s)
+
+proc newGNode*(s: GLiteral): GNode =
+  GNode(kind: GNodeKind.Literal, literal: s)
+
+proc newGNode*(s: GDefinition): GNode =
+  GNode(kind: GNodeKind.Definition, definition: s)
+
+proc newGNode*(s: GAssignment): GNode =
+  GNode(kind: GNodeKind.Assignment, assignment: s)
+
+proc newGNode*(s: GList): GNode =
+  GNode(kind: GNodeKind.List, list: s)

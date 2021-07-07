@@ -1,3 +1,9 @@
-# import nimtolua
+import nim_to_general, general_to_nim
 
-# echo readFile("src/test.nim").writeLua(2)
+macro test*(nimCode: typed): untyped =
+  echo nimCode.toGNode.toNimCode
+
+test:
+  let
+    a, b = 1
+    c = 2

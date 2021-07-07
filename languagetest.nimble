@@ -12,5 +12,5 @@ backend = "c"
 # Dependencies
 
 requires "nim >= 1.4.0"
-requires "hnimast >= 0.3.31"
-requires "hpprint"
+# requires "hnimast >= 0.3.31"
+# requires "hpprint"

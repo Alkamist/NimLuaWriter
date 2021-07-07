@@ -1,4 +1,4 @@
-import general_ast
+import general_ast, indentation
 
 proc toNimCode*(n: GNode): string
 
@@ -22,9 +22,6 @@ proc typeToNimCode(n: GNode): string =
   of GTypeKind.Float128: "float128"
   of GTypeKind.String: "string"
   of GTypeKind.Bool: "bool"
-
-proc symbolToNimCode(n: GNode): string =
-  n.symbolName
 
 proc letDefinitionToNimCode(n: GNode): string =
   result.add "let "
@@ -53,16 +50,30 @@ proc statementListToNimCode(n: GNode): string =
     if i < lastId:
       result.add "\n"
 
+proc statementListExpressionToNimCode(n: GNode): string =
+  result.add "block:" & IndentLevelUp & "\n"
+
+  let lastId = n.children.len - 1
+  for i, node in n.children:
+    result.add node.toNimCode
+    if i < lastId:
+      result.add "\n"
+
+  result.add IndentLevelDown
+
 proc toNimCode*(n: GNode): string =
   case n.kind:
-  of GNodeKind.Empty: ""
+  of GNodeKind.Empty: "EMPTY"
   of GNodeKind.NilLiteral: "nil"
   of GNodeKind.CharLiteral..GNodeKind.UInt64Literal: $n.intValue
   of GNodeKind.FloatLiteral..GNodeKind.Float128Literal: $n.floatValue
-  of GNodeKind.Identifier, GNodeKind.StringLiteral: "\"" & n.stringValue & "\""
+  of GNodeKind.Identifier: n.stringValue
+  of GNodeKind.StringLiteral: "\"" & n.stringValue & "\""
   of GNodeKind.BoolLiteral: $n.boolValue
   of GNodeKind.Type: n.typeToNimCode
-  of GNodeKind.Symbol: n.symbolToNimCode
+  of GNodeKind.Symbol: n.symbolName
   of GNodeKind.LetDefinition: n.letDefinitionToNimCode
   of GNodeKind.VarDefinition: n.varDefinitionToNimCode
   of GNodeKind.StatementList: n.statementListToNimCode
+  of GNodeKind.StatementListExpression: n.statementListExpressionToNimCode
+  of GNodeKind.Infix: n.infixLeft.toNimCode & " " & n.infixOperator.toNimCode & " " & n.infixRight.toNimCode

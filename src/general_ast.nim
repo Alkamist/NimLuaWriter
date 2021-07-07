@@ -12,16 +12,16 @@ type
 
   GNodeKind* {.pure.} = enum
     Empty,
-    Identifier,
     CharLiteral,
     IntLiteral, Int8Literal, Int16Literal, Int32Literal, Int64Literal,
     UIntLiteral, UInt8Literal, UInt16Literal, UInt32Literal, UInt64Literal,
     FloatLiteral, Float32Literal, Float64Literal, Float128Literal,
     StringLiteral, BoolLiteral,
     NilLiteral,
-    Type, Symbol,
-    StatementList,
+    Type, Identifier, Symbol,
+    StatementList, StatementListExpression,
     LetDefinition, VarDefinition,
+    Infix,
 
   GNode* = ref object
     case kind*: GNodeKind
@@ -35,7 +35,7 @@ type
       symbolName*: string
       symbolKind*: GSymbolKind
       symbolType*: GNode
-      symbolOwner*: GNode
+      #symbolOwner*: GNode
     of GNodeKind.LetDefinition:
       letDefinitionSymbol*: GNode
       letDefinitionType*: GNode
@@ -44,13 +44,16 @@ type
       varDefinitionSymbol*: GNode
       varDefinitionType*: GNode
       varDefinitionValue*: GNode
+    of GNodeKind.Infix:
+      infixOperator*: GNode
+      infixLeft*: GNode
+      infixRight*: GNode
     else: children*: seq[GNode]
+
+#########################################################
 
 proc newGEmpty*(): GNode =
   GNode(kind: GNodeKind.Empty)
-
-proc newGIdentifier*(value: string): GNode =
-  GNode(kind: GNodeKind.Identifier, stringValue: value)
 
 proc newGCharLiteral*(value: BiggestInt): GNode =
   GNode(kind: GNodeKind.CharLiteral, intValue: value)
@@ -106,17 +109,136 @@ proc newGBoolLiteral*(value: bool): GNode =
 proc newGNilLiteral*(): GNode =
   GNode(kind: GNodeKind.NilLiteral)
 
-proc newGType*(): GNode =
-  GNode(kind: GNodeKind.Type)
+proc newGType*(kind: GTypeKind): GNode =
+  GNode(kind: GNodeKind.Type, typeKind: kind)
 
-proc newGSymbol*(): GNode =
-  GNode(kind: GNodeKind.Symbol)
+proc newGIdentifier*(value: string): GNode =
+  GNode(kind: GNodeKind.Identifier, stringValue: value)
 
-proc newGLetDefinition*(): GNode =
-  GNode(kind: GNodeKind.LetDefinition)
+proc newGSymbol*(name: string, kind: GSymbolKind, typeNode: GNode): GNode =
+  GNode(kind: GNodeKind.Symbol,
+    symbolName: name,
+    symbolKind: kind,
+    symbolType: typeNode,
+  )
 
-proc newGVarDefinition*(): GNode =
-  GNode(kind: GNodeKind.VarDefinition)
+proc newGStatementList*(children = newSeq[GNode]()): GNode =
+  GNode(kind: GNodeKind.StatementList,
+    children: children,
+  )
 
-proc newGStatementList*(): GNode =
-  GNode(kind: GNodeKind.StatementList)
+proc newGStatementListExpression*(children = newSeq[GNode]()): GNode =
+  GNode(kind: GNodeKind.StatementListExpression,
+    children: children,
+  )
+
+proc newGLetDefinition*(symbol: GNode, typeNode, value = newGEmpty()): GNode =
+  GNode(kind: GNodeKind.LetDefinition,
+    letDefinitionSymbol: symbol,
+    letDefinitionType: typeNode,
+    letDefinitionValue: value,
+  )
+
+proc newGVarDefinition*(symbol: GNode, typeNode, value = newGEmpty()): GNode =
+  GNode(kind: GNodeKind.VarDefinition,
+    varDefinitionSymbol: symbol,
+    varDefinitionType: typeNode,
+    varDefinitionValue: value,
+  )
+
+proc newGInfix*(operator, left, right: GNode): GNode =
+  GNode(kind: GNodeKind.Infix,
+    infixOperator: operator,
+    infixLeft: left,
+    infixRight: right,
+  )
+
+#########################################################
+
+const
+  AssignmentExpressions = [
+    GNodeKind.StatementListExpression, GNodeKind.Infix,
+  ]
+  ListNodes = [
+    GNodeKind.StatementList, GNodeKind.StatementListExpression,
+  ]
+
+proc expressionsAndAssignment*(symbol: GNode, value: GNode): (GNode, GNode) =
+  if value.kind == GNodeKind.Infix:
+    let (leftExpressions, leftAssignment) = expressionsAndAssignment(symbol, value.infixLeft)
+    let (rightExpressions, rightAssignment) = expressionsAndAssignment(symbol, value.infixRight)
+
+    let expressions = newGStatementList(@[
+      leftExpressions, rightExpressions
+    ])
+
+    let assignment = newGInfix(
+      operator = value.infixOperator,
+      left = leftAssignment,
+      right = rightAssignment,
+    )
+
+    result = (expressions, assignment)
+
+  else:
+    let tempVar = newGSymbol(
+      name = "tempVar",
+      kind = GSymbolKind.Var,
+      typeNode = symbol.symbolType
+    )
+
+    let tempDefinition = newGVarDefinition(
+      symbol = tempVar,
+      typeNode = tempVar.symbolType,
+      value = newGEmpty(),
+    )
+
+    let expression = newGStatementList(@[
+      tempDefinition, value
+    ])
+
+    result = (expression, tempVar)
+
+proc removeAssignmentExpressions*(n: GNode): GNode =
+  case n.kind:
+  of GNodeKind.StatementList:
+    result = newGStatementList()
+    for child in n.children:
+      result.children.add child.removeAssignmentExpressions
+
+  of GNodeKind.LetDefinition:
+    if n.letDefinitionValue.kind in AssignmentExpressions:
+      let (expressions, assignment) = expressionsAndAssignment(n.letDefinitionSymbol,
+                                                               n.letDefinitionValue)
+
+      let definition = newGLetDefinition(
+        symbol = n.letDefinitionSymbol,
+        typeNode = n.letDefinitionType,
+        value = assignment,
+      )
+
+      result = newGStatementList(@[
+        expressions, definition
+      ])
+    else:
+      result = n
+
+  else:
+    result = n
+
+proc isExtraneous*(n: GNode): bool =
+  n.kind == GNodeKind.Empty or
+  (n.kind in ListNodes and n.children.len < 1)
+
+proc cleanGNode*(n: GNode): GNode =
+  case n.kind:
+  of ListNodes:
+    result = GNode(kind: n.kind)
+
+    for child in n.children:
+      if child.isExtraneous:
+        continue
+
+      result.children.add child.cleanGNode
+  else:
+    result = n

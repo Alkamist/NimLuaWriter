@@ -2,7 +2,7 @@ const
   IndentLevelUp* = "@INDENT_UP"
   IndentLevelDown* = "@INDENT_DOWN"
 
-proc addIndentation*(spaces: int, text: string): string =
+proc addIndentation*(text: string, spaces: int): string =
   result = ""
 
   var
@@ -13,7 +13,7 @@ proc addIndentation*(spaces: int, text: string): string =
     indentationStr.add(" ")
 
   template indent(): untyped =
-    for _ in 0..<indentationLevel:
+    for _ in 0 ..< indentationLevel:
       result.add indentationStr
 
   var i = 0
@@ -24,14 +24,12 @@ proc addIndentation*(spaces: int, text: string): string =
        text[i ..< i + IndentLevelUp.len] == IndentLevelUp:
       indentationLevel += 1
       i += IndentLevelUp.len
-      result.add "\n"
       indent()
 
     elif charsTilEof >= IndentLevelDown.len and
          text[i ..< i + IndentLevelDown.len] == IndentLevelDown:
       indentationLevel -= 1
       i += IndentLevelDown.len
-      result.add "\n"
       indent()
 
     else:
